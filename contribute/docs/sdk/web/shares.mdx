@@ -1,0 +1,208 @@
+---
+title: sharesClient
+description: Anonymous governance for shyshares-v1 — DAO and custody consortium models
+---
+
+> Initialize with [`initializeFromShyConfig`](/sdk/web/overview#pattern) — see the [Web SDK overview](/sdk/web/overview) for the common setup pattern.
+
+> Non-standard options for this client: `{ operatorMode: true }` to enable poll creation and admin methods.
+
+## Poll create authority
+
+Any eligible holder may create a poll regardless of deployment model.
+`poll_create_authority: "any_holder"` is the only supported value.
+
+`poll_create_keys` in the shyconfig is a list of known operator/board Ed25519 public
+keys used for **tagging only**. When the ABCI app sees a PollCreate signed by a listed
+key it emits `creator_type: "authority"` in the block event. All other PollCreate txs
+emit `creator_type: "holder"`. The client exposes this as a `creatorType` field on the
+`Proposal` object so the frontend can badge official polls without restricting creation.
+
+```js
+// Any holder — no special key needed
+await client.createProposal({ ... })
+
+// Board/operator — pass the authority key to get creator_type: "authority" badge
+await client.createProposal({
+  ...,
+  signingKey: boardPrivKey    // optional — determines creatorType tag only
+})
+```
+
+---
+
+## Membership and eligibility
+
+```js
+// Build an account commitment for a wallet or DID subject
+const { commitment } = await client.createAccountCommitment({
+  walletAddress: '0xabc...'         // WalletVerifier deployments (shywire/shyshares)
+  // or:
+  subjectDID: 'did:prism:...'       // IdentusVerifier deployments (shyshares custody)
+})
+
+// Current silo or token balance for this commitment
+await client.getBalance(eligibilityAssetId, commitment)
+// → { balance }
+
+// Effective voting weight at the snapshot block for an active proposal
+await client.getMembershipSnapshot(commitment, proposalId)
+// → { weight, snapshotHeight }
+```
+
+Token or silo transfers after the snapshot block do not affect weight for that proposal.
+
+---
+
+## Proposals
+
+```js
+await client.listProposals(filters?)
+// filters: { status, proposalClass }
+// → Proposal[]
+
+await client.getProposal(proposalId)
+// → Proposal { id, class, question, options, snapshotBlock, status }
+
+await client.getTally(proposalId)
+// → Tally | null
+```
+
+### Create a proposal (operator/board or any holder)
+
+```js
+await client.createProposal({
+  class: 'parameter_change',        // must be in governance.proposal_classes
+  question: 'Increase fee to 0.3%?',
+  options: ['yes', 'no'],
+  startTime: unixSeconds,
+  endTime: unixSeconds,
+  operatorSigningKey: key           // required when poll_create_authority = operator_or_board
+})
+```
+
+Custody proposal classes — `custody_policy`, `warehouse_operator`, `accepted_sku_class`:
+
+```js
+await operatorClient.createProposal({
+  class: 'warehouse_operator',
+  question: 'Approve warehouse operator WH-NYC-2?',
+  options: ['approve', 'reject'],
+  startTime,
+  endTime,
+  operatorSigningKey: boardPrivKey
+})
+```
+
+### Close a proposal
+
+```js
+await client.closeProposal(proposalId)
+```
+
+---
+
+## Weighted ballot
+
+```js
+await client.submitWeightedBallot({
+  proposalId: 'proposal-42',
+  choice: 'yes',
+  accountCommitment: commitment,
+  identityInput: {
+    walletAddress: '0xabc...'         // WalletVerifier
+    // or:
+    subjectDID: 'did:prism:...',
+    voterPrivKey: ephemeralPrivKey,    // IdentusVerifier
+    issuerCredentialSig: credSig
+  }
+})
+```
+
+Vote weight is read from the membership snapshot at the proposal's snapshot block.
+The List 1 record contains only the choice and a direction-free ballot ID — no identity,
+no wallet address, no DID. The List 2 record contains only the identity commitment — no
+choice, no weight.
+
+---
+
+## Governance snapshot
+
+| `snapshotMode` | When weight is fixed |
+|---|---|
+| `proposal_creation_time` | At the block the proposal is created |
+| `voting_start` | At the submission-period opening block |
+| `block_height` | Explicit block height in the proposal record |
+
+---
+
+## Action queue (DAO model)
+
+```js
+await client.listActions(filters?)
+// → QueuedAction[]
+
+await client.getAction(actionId)
+// → QueuedAction { id, type, payload, proposalId, status, enqueueHeight }
+
+await client.dispatchAction(actionId, {
+  adapter: 'shywire',    // or 'byodao'
+  adapterPayload: { ... }
+})
+```
+
+Actions are enqueued to canonical ledger state when a proposal crosses both quorum and
+approval thresholds. The canonical queue record is the authoritative governance result.
+
+The custody consortium model (`operator_or_board`) does not use the action queue —
+policy changes are applied directly by the operator via the appropriate custody tx type
+after a passing vote.
+
+---
+
+## Deployment guide
+
+### DAO governance (any_holder)
+
+Any eligible token holder may create proposals. Voting weight is proportional to fungible token balance.
+
+```json
+"governance": {
+  "poll_create_authority": "any_holder",
+  "membership_sources": ["token_balance"],
+  "proposal_classes": ["payout", "parameter_change", "role_change"],
+  "eligibility": { "asset_id": "gov-token", "min_balance": 1 },
+  "vote_weight": "token_quantity"
+}
+```
+
+The shywire sub-state holds the anonymous holder registry; the shyvoting sub-state holds anonymous ballot state per proposal. Both run on one CometBFT chain with atomic app hash: `sha256(voting_app_hash || wire_app_hash)`.
+
+### Custody consortium governance (operator_or_board)
+
+Board or warehouse operators initiate polls. Holders vote anonymously on consortium policy, warehouse operator approvals, and accepted SKU classes.
+
+```json
+"governance": {
+  "poll_create_authority": "operator_or_board",
+  "poll_create_keys": ["<operator-pubkey-hex>", "<board-pubkey-hex>"],
+  "membership_sources": ["token_balance"],
+  "proposal_classes": ["custody_policy", "warehouse_operator", "accepted_sku_class"],
+  "eligibility": { "asset_id": "silo", "min_balance": 1 },
+  "vote_weight": "token_quantity"
+}
+```
+
+Polls are tagged by signer type at execution time (`creator_type: "house" | "authority" | "holder"`). No creation is blocked — tagging is informational.
+
+**House entity onboarding (KYB):** the `house` creator type requires verified beneficial ownership via Persona KYB before the Ed25519 signing key is admitted to `house_keys`. Use the `house-onboard` CLI tool — see [CLI reference](/cli).
+
+### Provisioning
+
+Both models use the same binary — no per-deployment Go code:
+
+```bash
+shyware-abci --config shyconfig.json --db-path /opt/<deployment>/data --addr :26658
+shyware-api  --config shyconfig.json --port 8080
+cd <deployment>/deploy/signing && terragrunt apply
+```

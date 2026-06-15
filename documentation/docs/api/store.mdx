@@ -1,0 +1,53 @@
+---
+title: store
+description: HTTP API for shystore-v1 secret storage
+---
+
+## Base URL
+
+Configured via `shyconfig.api.base_url`.
+
+## Authentication
+
+All endpoints require `Authorization: Bearer <token>`. The `sub` claim is the input to `identity_hash` derivation for List 2.
+
+## Privacy contract
+
+`GET /api/store/secrets/all` returns `403` by construction — no endpoint returns a cross-participant list. All retrieval paths are per-participant and identity-gated.
+
+## Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/store/secrets` | Store a sealed submission (atomic List 1 + List 2) |
+| `GET` | `/api/store/secrets/:submissionId` | Read the reveal event |
+| `DELETE` | `/api/store/secrets/:submissionId` | Withdraw (bilateral removal) |
+| `POST` | `/api/store/recover` | Biometric recovery |
+| `GET` | `/api/store/vaults/:vaultId/count` | Aggregate secret count (operator-visible only) |
+| `GET` | `/api/store/secrets/all` | Always `403` |
+
+---
+
+## POST /api/store/secrets
+
+```json
+{
+  "scoping_id": "bucket-2026-q2",
+  "submission_nonce": "<32-byte hex>",
+  "sealed_payload": "<AES-GCM ciphertext>",
+  "category": "auth_seed_totp",
+  "sender_pub_key": "<Ed25519 hex>",
+  "sender_sig": "<Sign(sk, submission_nonce:scoping_id)>",
+  "idv_attestation": {}
+}
+```
+
+`sealed_payload` must be AES-GCM encrypted before submission. The ABCI layer stores ciphertext in List 1 verbatim.
+
+Response: `{ "submission_id": "<H(submission_nonce)>" }`
+
+---
+
+## DELETE /api/store/secrets/:submissionId
+
+Broadcasts `SecretWithdraw` — bilateral removal from List 1 and List 2. Count-match is preserved. Permanently unrecoverable after deletion.

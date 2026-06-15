@@ -1,0 +1,137 @@
+---
+title: Android Attestation
+description: Play Integrity integration and write-only posture for Android deployments
+---
+
+## Why Play Integrity matters
+
+On Android, `write_only_on_missing_play_integrity` gates receipt confirmation:
+
+```json
+{
+  "deployment": {
+    "default_posture": "recoverable",
+    "runtime_fallbacks": {
+      "write_only_on_missing_play_integrity": true,
+      "write_only_on_untrusted_device_attestation": false
+    }
+  }
+}
+```
+
+When this flag is `true` and Play Integrity is unavailable or fails, `resolveEffectivePosture` returns `write_only`. The ballot is submitted but no receipt nonce is persisted — the voter has no offline proof of their direction.
+
+In high-assurance anti-surveillance deployments the shyconfig also sets `write_only_on_hostile_network: true`. On Android, the calling app provides the network signal — VPN detection via `ConnectivityManager`, or an IP-based jurisdiction check against the shyconfig `high_risk_region_blocklist` — and sets `network.hostile = true` when a hostile or sanctioned environment is detected. **Web cannot provide this signal.** A browser has no trusted mechanism to assess whether the client is operating behind a VPN or from a sanctioned jurisdiction; any browser-side check is trivially spoofable. Because web can never produce a verified negative on hostile-environment detection, recoverable posture is structurally unavailable on web for high-assurance deployments. Play Integrity — combined with a trusted network signal — is what authorizes the recoverable path on Android.
+
+---
+
+## Play Integrity lifecycle
+
+### 1. Initialize
+
+```kotlin
+val integrity = PlayIntegrityProvider(
+    context = applicationContext,
+    cloudProjectNumber = 1234567890L,   // Google Cloud project number
+)
+```
+
+`cloudProjectNumber` must match the project linked in Play Console → App integrity. Obtain it from your Google Cloud Console.
+
+### 2. Request a token
+
+```kotlin
+viewModelScope.launch {
+    // Fetch a one-time nonce from your server (prevents replay attacks)
+    val nonce = fetchNonceFromServer()
+
+    val (signals, token) = integrity.requestIntegrityToken(nonce)
+
+    if (token != null) {
+        // Send token to your server for decryption and verdict evaluation
+        val trusted = verifyIntegrityTokenOnServer(token)
+        if (trusted) {
+            client.setRuntimeSignals(signals)
+        } else {
+            client.setRuntimeSignals(RuntimeSignals.untrusted)
+        }
+    } else {
+        client.setRuntimeSignals(RuntimeSignals.untrusted)
+    }
+}
+```
+
+`PlayIntegrityProvider.requestIntegrityToken` returns `signals` with `playIntegrity.passed = true` when a token is received. The server must still verify the token — the client signal is optimistic pending server confirmation.
+
+### 3. Server-side token verification
+
+The integrity token is an encrypted JWT. Decrypt and verify it server-side using the Play Integrity API:
+
+```
+POST https://playintegrity.googleapis.com/v1/{packageName}:decodeIntegrityToken
+```
+
+Check verdicts:
+- `MEETS_DEVICE_INTEGRITY` — device passes hardware attestation
+- `MEETS_BASIC_INTEGRITY` — device passes software checks (minimum bar)
+- `MEETS_STRONG_INTEGRITY` — hardware-backed keystore confirmed (highest assurance)
+
+For hostile-regime deployments, require `MEETS_DEVICE_INTEGRITY` or `MEETS_STRONG_INTEGRITY`.
+
+### 4. Posture resolution
+
+```kotlin
+val posture = client.effectivePosture()
+when {
+    posture.writeOnly && "missing_play_integrity" in posture.fallbackReasons ->
+        showWriteOnlyUI("Play Integrity unavailable on this device.")
+    posture.recoverable ->
+        showFullBallotUI()
+}
+```
+
+---
+
+## Emulator behavior
+
+Play Integrity always fails on emulators. For development:
+
+```kotlin
+if (BuildConfig.DEBUG) {
+    client.setRuntimeSignals(RuntimeSignals.trusted)
+} else {
+    val (signals, token) = integrity.requestIntegrityToken(nonce)
+    // ... server verification ...
+    client.setRuntimeSignals(signals)
+}
+```
+
+Do not ship the debug override to production builds.
+
+---
+
+## Receipt storage
+
+When posture is `recoverable`, `castBallot` persists a `BallotReceipt` to `EncryptedSharedPreferences` backed by the Android Keystore (AES-256-GCM). On supported devices, the master key is hardware-backed.
+
+```kotlin
+// Load a previously saved receipt
+val receipt = client.loadReceipt(pollId = "proposal-42")
+receipt?.let {
+    val verification = client.verifyReceipt(it.ballotNonce, it.choice, votes)
+}
+```
+
+For cross-device recovery, the voter re-authenticates with the IDV provider (Didit biometric), which re-derives the commitment and allows re-verification against the public vote list — no seed phrase required.
+
+---
+
+## Signal shape reference
+
+The `RuntimeSignals` type mirrors the JS SDK signal shape exactly, so shyconfig `runtime_fallbacks` keys map identically across platforms:
+
+| shyconfig key | Android source | iOS source |
+|---|---|---|
+| `write_only_on_missing_play_integrity` | Play Integrity API | (not applicable — use device attestation) |
+| `write_only_on_untrusted_device_attestation` | Play Integrity verdict | App Attest |
+| `write_only_on_hostile_network` | Network monitoring / VPN detection | Network monitoring |

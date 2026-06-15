@@ -1,0 +1,75 @@
+---
+title: Utility clients
+description: hopClient, camClient, IoTClient — store semantics for relay, camera, and sensor surfaces
+---
+
+> Initialize with [`initializeFromShyConfig`](/sdk/web/overview#pattern). All utility clients follow the [sealer-governed](/sdk/web/sealer) pattern — `deriveSealerKey` required.
+
+Utility clients wrap `storeClient` semantics for specific hardware or network surfaces. They share the same bucket lifecycle, sealed submission, and biometric recovery model as `storeClient`. Configure via `app.product_type` in the shyconfig rather than a distinct `contract_version`.
+
+---
+
+## hopClient
+
+Seals follow-up destination metadata (next-hop address, port, transport) so route destinations are structurally absent from canonical state.
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/hopClient.js'
+```
+
+```js
+await client.sealFollowUpDestination({ scopingId, destination_address, destination_port, transport, ttl_ms })
+await client.revealFollowUpDestination({ scopingId, submissionId })
+await client.rotateFollowUpDestination({ scopingId, submissionId, newDestination })
+```
+
+**`product_type`**: `shyhop` | `shystream` | `shycam` | `shyiot`
+
+shyhop improves canonical-state confidentiality for destination metadata. It does not hide first-hop network metadata at the transport layer.
+
+---
+
+## camClient
+
+Seals attested observation and liveness proofs as utility records.
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/camClient.js'
+```
+
+```js
+await client.sealObservationProof({ scopingId, payload })
+await client.revealObservationProof({ scopingId, submissionId })
+await client.rotateObservationProof({ scopingId, submissionId, newPayload })
+```
+
+**`product_type`**: `shycam` | `shycustody` | `shystream` | `shyhop`
+
+---
+
+## IoTClient
+
+Seals telemetry and device event payloads as utility records.
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/IoTClient.js'
+```
+
+```js
+await client.sealTelemetryRecord({ scopingId, payload })
+await client.revealTelemetryRecord({ scopingId, submissionId })
+await client.rotateTelemetryRecord({ scopingId, submissionId, newPayload })
+```
+
+**`product_type`**: `shyiot` | `shycam`
+
+---
+
+## Shared manifest requirements
+
+All utility clients require in the shyconfig:
+
+- `store` block present
+- `anon_layer.black_box_required: true`
+- At least one of `anon_layer.shyPayload: true` or `anon_layer.shyIDV: true` (defaults to `shyPayload` if neither set)
+- `signing.required: true`

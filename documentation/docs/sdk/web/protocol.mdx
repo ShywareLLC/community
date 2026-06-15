@@ -1,0 +1,140 @@
+---
+title: Protocol derivation
+description: Correct derivation of submission identifiers and identity commitments — why it matters and how to do it right
+sidebar_position: 2
+---
+
+## Why derivation matters
+
+The two-list invariant holds in canonical state. But the structural security properties depend on HOW the L1 submission identifier and L2 identity commitment are derived by client code. A structurally correct state machine with incorrect client-side derivation weakens or eliminates the following guarantees:
+
+| Guarantee | Client responsibility | What breaks if violated |
+|---|---|---|
+| **Temporal verifiability** | `submissionId = H(blockHash \|\| nonce)` | Fabricated identifiers indistinguishable from legitimate ones |
+| **Independent derivation paths** | `submissionId` and `identityHash` share no derivation input | Cross-field correlation possible |
+| **Cross-scoping unlinkability** | `identityHash = H(uid \|\| scopingId)` | Same participant's L2 entries linkable across scoping IDs |
+
+---
+
+## Submission identifier
+
+```js
+import { deriveSubmissionId, generateSubmissionNonce } from '@shyware-sdk/protocol/submissionId.js';
+
+// 1. Fetch the latest committed block hash (canonical, publicly verifiable)
+const blockHash = await ledgerInterface.getLatestBlockHash();
+
+// 2. Generate a per-submission random nonce
+const nonce = generateSubmissionNonce(); // 32 random bytes
+
+// 3. Derive the submission identifier
+const submissionId = await deriveSubmissionId(blockHash, nonce);
+// submissionId = H(blockHash || nonce)
+```
+
+**Why beacon-conditioned:** Any party with the ledger can verify that `submissionId` was derived from a block hash that existed before the submission was created. A submission identifier fabricated before that block was published is structurally distinguishable — it would require knowledge of a future block hash. This prevents pre-computation attacks and provides a temporal anchor for each submission.
+
+**What not to do:** Using `crypto.randomUUID()` or `H(nonce)` alone produces a valid submission identifier for the state machine but provides no beacon-conditioning guarantee and no temporal verifiability.
+
+---
+
+## Identity commitment
+
+```js
+import { deriveIdentityHash } from '@shyware-sdk/protocol/submissionId.js';
+
+// identityHash = H(uid || scopingId)
+const identityHash = await deriveIdentityHash(uid, scopingId);
+```
+
+**Independent derivation paths:**
+The `submissionId` derivation inputs (`blockHash`, `nonce`) must share no value with the `identityHash` derivation inputs (`uid`, `scopingId`). Never pass identity material into `deriveSubmissionId` or submission material into `deriveIdentityHash`.
+
+**Cross-scoping unlinkability:**
+Including `scopingId` in the identity commitment means the same participant's `identityHash` for transaction A differs from their `identityHash` for transaction B:
+
+```
+H(uid || scopingId_A) ≠ H(uid || scopingId_B)
+```
+
+An observer with canonical state for both A and B cannot correlate the two L2 records to the same participant — because no shared field value exists in either record. Without the `scopingId`, `H(uid)` would be identical in both A and B, enabling trivial cross-transaction identity linkage.
+
+:::warning
+Always use `deriveIdentityHash(uid, scopingId)` — never `H(uid)` alone. Without `scopingId` in the commitment, the same participant's L2 entries become linkable across scoping IDs.
+:::
+
+---
+
+## Participant withdrawal and replacement
+
+The protocol requires participant-initiated withdrawal to need no co-authorization from any authority. The withdrawal is structurally distinguishable from an authority-initiated deletion by the absence of a dual-authority co-signature.
+
+Credential-free rescission extends this: the participant re-derives their `identityHash` from a fresh authentication attestation (biometric re-auth, device attestation, or IDV re-verification) — with no retained receipt, device-bound private key, or memorized credential required.
+
+```js
+// Credential-free rescission
+// 1. Fresh auth attestation — no cached state required
+const freshAttestation = await idvProvider.reAuthenticate(participantId);
+
+// 2. Re-derive identity hash from fresh attestation
+const identityHash = await deriveIdentityHash(freshAttestation.uid, scopingId);
+
+// 3. Resolve submissionId from the reconcile interface
+const { submissionId } = await reconcileInterface.resolveSubmission(identityHash, scopingId);
+
+// 4. Atomic delete via ledger interface
+await ledgerInterface.rescindTwoListWrite(scopingId, submissionId, identityHash);
+```
+
+---
+
+## Period-close attestation
+
+The period-close attestation binds two disjoint Merkle roots to a single signature:
+- `l1Root` — over the set of `submissionId` values in L1 (no identity material)
+- `l2Root` — over the set of `identityHash` values in L2 (no payload or submission ID)
+- `count` — the cardinality verified by count-match
+
+```js
+const l1Root = computeMerkleRoot(submissionIds.sort());
+const l2Root = computeMerkleRoot(identityHashes.sort());
+
+// Software tier: AWS KMS ECDSA-P256 (FIPS 140-3 L2)
+// Hardware tier: CloudHSM (FIPS 140-3 L3) — production target
+const attestation = await signingInterface.sign(`${l1Root}:${l2Root}:${count}`);
+
+await ledgerInterface.commitPeriodClose(scopingId, l1Root, l2Root, attestation);
+```
+
+**HSM attestation:** When `SIGNING_PROVIDER=aws_cloudhsm`, the attestation is produced inside a FIPS 140-3 L3 hardware security module. The signing key never leaves the HSM. Any party with the HSM's public key can independently verify aggregate correctness without trusting any operator.
+
+---
+
+## Reconcile interface non-enumerability
+
+The reconciling interface enforces two structural constraints:
+
+1. **Fresh input required:** Each reconcile invocation requires a fresh authentication token. A stale or replayed token is rejected before any `submissionId` is resolved.
+
+2. **Non-enumerable:** The interface accepts only authenticated per-participant requests and produces at most one resolution per invocation. No sequence of calls produces a list of all `identityHash` values or `submissionId` values for a scoping ID.
+
+This is enforced at the API layer via ownership-gated SQL queries — not at the chaincode level. The chaincode itself exposes `getCount` which returns only cardinality; it does not enumerate entries. The off-chain reconcile interface is the only path to per-participant resolution, and it is structurally non-composable.
+
+
+---
+
+## Intermediate-state non-materialization
+
+The prohibition on intermediate states holds at the chaincode level, not the client level. The Go chaincode uses a function-scope-only struct for pre-commit validation:
+
+```go
+// Transient struct — never persisted, never accessible via state-machine interface,
+// destroyed on function return
+var l1 List1Record  // function scope only
+var l2 List2Record  // function scope only
+// ... validate, then call stub.PutState() for L1 and L2 independently
+```
+
+A function-scope-only struct used for pre-commit coordination that is never validator-addressable does not constitute a prohibited intermediate state.
+
+No partial canonical state (`l1Count ≠ l2Count`) is ever observable between the start and completion of a `submitTwoListWrite` transaction — the atomic two-list write is enforced at the chaincode level.

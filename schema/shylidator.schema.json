@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shyware.fyi/schema/shylidator.schema.json",
+  "title": "shylidator",
+  "description": "Operator/validator configuration for a shyware deployment. Server-side only — never bundled with the client app. Contains signing infrastructure and posture overrides.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["signing"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "signing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend"],
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["aws_kms", "aws_kms_x_aws_cloudhsm", "local_ed25519", "none"]
+        },
+        "validator_key_id":      { "type": "string" },
+        "tally_key_id":          { "type": "string" },
+        "contract_key_id":       { "type": "string" },
+        "external_hsm":          { "type": "string", "enum": ["aws_cloudhsm"] },
+        "external_hsm_key_name": { "type": "string" },
+        "external_hsm_uri":      { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "backend": { "enum": ["aws_kms", "aws_kms_x_aws_cloudhsm"] } }, "required": ["backend"] },
+          "then": { "required": ["validator_key_id", "tally_key_id"] }
+        },
+        {
+          "if": { "properties": { "backend": { "const": "aws_kms_x_aws_cloudhsm" } }, "required": ["backend"] },
+          "then": { "required": ["external_hsm", "external_hsm_key_name", "external_hsm_uri"] }
+        }
+      ]
+    },
+    "deployment": {
+      "type": "object",
+      "description": "Posture overrides. SDK default_posture: recoverable. SDK runtime_fallbacks: true for shyvoting/shycontracts, false for all others.",
+      "additionalProperties": false,
+      "properties": {
+        "default_posture": {
+          "type": "string",
+          "enum": ["recoverable", "coercion_resistant"]
+        },
+        "runtime_fallbacks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "write_only_on_missing_play_integrity":       { "type": "boolean" },
+            "write_only_on_hostile_network":              { "type": "boolean" },
+            "write_only_on_untrusted_device_attestation": { "type": "boolean" },
+            "write_only_on_hsm_unavailable":              { "type": "boolean" },
+            "write_only_on_missing_web_session_approval": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}

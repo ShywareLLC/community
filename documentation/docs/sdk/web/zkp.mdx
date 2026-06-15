@@ -1,0 +1,197 @@
+---
+title: zkpClient (web)
+description: ZK nullifier proof generation and biometric-recoverable secret management for the high-assurance voting tier
+sidebar_position: 14
+---
+
+:::warning
+The ZK tier requires a Groth16 multi-party computation trusted-setup ceremony before production use. The single-party setup produced by `go run ./cmd/zk-setup` allows proof forgery and is **development-only**.
+:::
+
+## Import
+
+```js
+import {
+  initZKProver,
+  generatePersonSecret,
+  encryptPersonSecret,
+  decryptPersonSecret,
+  computeCommitment,
+  computeNullifier,
+  generateProof,
+  buildZKBallotEnvelope
+} from 'shyware/sdk/web/zkpClient.js'
+```
+
+---
+
+## What the ZK tier adds
+
+The base protocol (preferred non-ZK tier) uses `SHA-256(voter_pub_key ‖ scoping_id)` as the identity hash. The IDV provider can correlate this with their own attestation record, making the receipt store linkable under lawful process.
+
+The ZK tier replaces the identity hash with a **ZK nullifier**: `MiMC(person_secret, scoping_id)`. The IDV provider attests a `commitment = MiMC(person_secret)` as a private circuit witness — it never appears on-chain. Even a read-only IDV with full database access cannot map the on-chain nullifier back to a person's identity. Receipt store linkage is structurally impossible for any party, including the operator.
+
+Both tiers prevent oracle forgery. The distinction is what a non-compromised IDV provider can see.
+
+---
+
+## Prover initialization
+
+Load the WASM prover and proving key binary. Must be called once before any proof generation.
+
+```js
+const prover = await initZKProver(
+  '/static/shyware_zkp.wasm',
+  '/static/nullifier_pk.bin'
+)
+```
+
+The WASM module signals readiness via `globalThis.shywareZKReady = true`. `initZKProver` waits for this signal before resolving.
+
+---
+
+## Person secret lifecycle
+
+The `person_secret` is a 32-byte random value generated once per participant and retained for the lifetime of the deployment. It is the root of the ZK identity — losing it permanently severs the ability to prove commitment ownership.
+
+### Generate
+
+```js
+const personSecret = generatePersonSecret()
+// → 32-byte hex string, e.g. "a3f8..."
+```
+
+### Encrypt for biometric recovery
+
+```js
+const encSecret = encryptPersonSecret(personSecret, biometricKey)
+// biometricKey: base64-encoded AES-256 key (re-derived by IDV on any device)
+// → base64 ciphertext with prepended IV (AES-256-GCM)
+```
+
+Store `encSecret` in the receipt store alongside the commitment. The `biometricKey` is derived by the IDV provider from the participant's biometric on any device — no seed phrase, no password.
+
+### Decrypt (recovery)
+
+```js
+const recovered = decryptPersonSecret(encSecretBase64, biometricKey)
+// → personSecret hex string
+```
+
+Recovery path: participant re-verifies with the IDV provider on any device → IDV re-derives `biometricKey` → `decryptPersonSecret` → participant re-derives nullifier for any poll.
+
+---
+
+## Commitment and nullifier (without proof)
+
+Use these when you need the commitment or nullifier value but do not need a proof — for example, during enrollment or receipt verification.
+
+```js
+const commitment = computeCommitment(personSecret)
+// → MiMC(personSecret) hex — Didit attests this value
+
+const nullifier = computeNullifier(personSecret, submissionId)
+// → MiMC(personSecret, submissionId) hex — on-chain identity hash for this scoping period
+```
+
+---
+
+## Proof generation
+
+```js
+const { proofBytes, commitmentHex, nullifierHex } = await prover.generateProof(personSecret, submissionId)
+// proofBytes: base64-encoded Groth16 proof
+// The circuit proves:
+//   MiMC(personSecret)            == commitmentHex   (Didit binding)
+//   MiMC(personSecret, scopingId) == nullifierHex    (per-period dedup)
+```
+
+Proof generation time: ~3–15 seconds in WASM depending on device. Generate proofs before the user reaches the submission screen to avoid perceived latency.
+
+---
+
+## Full ballot envelope
+
+```js
+const envelope = await buildZKBallotEnvelope({
+  scopingId: 'proposal-42',
+  choices: ['yes'],
+  personSecret,
+  diditCommitmentSigBase64: diditSig,   // Didit's Ed25519 sig over SHA-256(commitment ‖ scopingId)
+  encSecret,                            // pass-through for receipt store
+  timestamp: Math.floor(Date.now() / 1000)
+})
+// → {
+//     txJson,          // TxTypeBallotCast payload — submit to /ballots
+//     submissionId,    // H(submissionNonce) — direction-free public identifier
+//     submissionNonce, // random 32-byte hex — private receipt; do not expose
+//     nullifier,       // MiMC(personSecret, scopingId)
+//     encSecret        // pass-through
+//   }
+```
+
+### What goes on-chain
+
+```json
+{
+  "type": 2,
+  "data": {
+    "scoping_id": "...",
+    "zk_nullifier": "...",
+    "zk_nullifier_proof": "...",
+    "choices": ["yes"],
+    "submission_nonce": "...",
+    "voter_pub_key": "...",
+    "voter_sig": "...",
+    "timestamp": 1700040000
+  }
+}
+```
+
+### What does NOT go on-chain
+
+- `commitment` — private circuit witness
+- `didit_commitment_sig` — private circuit witness
+- `person_secret` — never leaves the device
+
+:::note
+`commitment` and `didit_commitment_sig` are currently included in the transaction payload as interim fields pending Ed25519 circuit hardening. Once the circuit includes a constraint verifying the Didit signature over the commitment, both fields will become private witnesses and must be removed from the payload. See the `TODO` in `shyware/zkp/nullifier.go`.
+:::
+
+---
+
+## Trusted setup
+
+### Development (single-party — not for production)
+
+```bash
+cd shyware
+go run ./cmd/zk-setup
+# → nullifier_pk.bin (proving key)
+# → nullifier_vk.bin (verifying key)
+```
+
+### Production (MPC ceremony required)
+
+Production deployments require a Groth16 multi-party computation ceremony (e.g., snarkjs phase2 or Hermez infrastructure). The single-party toxic waste from `cmd/zk-setup` allows any holder to forge valid proofs. It must never be used in a live deployment.
+
+After the ceremony:
+1. Replace `nullifier_pk.bin` and `nullifier_vk.bin` with ceremony outputs
+2. Restart the ABCI node with the new verifying key: `state.SetZKVerifier(zkp.NewVerifier(vkFile))`
+3. Publish the verifying key publicly — any party can verify proofs independently
+
+---
+
+## Circuit
+
+The Groth16 circuit (BN254 / EIP-197) over two constraints:
+
+```
+private witnesses: person_secret, commitment, didit_commitment_sig
+public inputs:     scoping_id, nullifier
+
+constraint 1: MiMC(person_secret)             == commitment
+constraint 2: MiMC(person_secret, scoping_id) == nullifier
+```
+
+Compiled in Go with `gnark` (BN254). See `shyware/zkp/nullifier.go` for circuit definition and `Compile()`, `NewProver()`, `NewVerifier()`.

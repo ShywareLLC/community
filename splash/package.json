@@ -1,0 +1,22 @@
+{
+  "name": "shyware-splash",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "docusaurus start",
+    "build": "docusaurus build",
+    "serve": "docusaurus serve",
+    "clear": "docusaurus clear"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.10.1",
+    "@docusaurus/preset-classic": "3.10.1",
+    "prism-react-renderer": "^2.4.1",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "overrides": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  }
+}

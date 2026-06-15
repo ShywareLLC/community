@@ -1,0 +1,118 @@
+---
+title: restClient
+description: Anonymous informant stream for shyrest-v1 deployments — sealed submissions with confidential dispatch
+---
+
+> Initialize with [`initializeFromShyConfig`](/sdk/web/overview#pattern) — see the [Web SDK overview](/sdk/web/overview) for the common setup pattern.
+
+> Non-standard options for this client: `deriveSealerKey`, `signMessage`, `getIdentityAttestation`.
+
+## Initialize
+
+```js
+const client = initializeFromShyConfig(shyconfig, {
+  getAuthHeaders:  async () => ({ Authorization: `Bearer ${token}` }),
+  deriveSealerKey: async () => derivedKeyMaterial,
+  signMessage:     async (msg) => ({ pubKeyHex, sigBytes })
+});
+
+const state = client.initialize();
+// → { store: { secretCategories, recoveryMode, ... }, messaging: { surfaceModel, auditModel, ... } }
+```
+
+The initialized state exposes both the store and messaging surfaces so the operator UI can determine which intake flows are active.
+
+## Store a sealed submission
+
+```js
+const { secretID } = await client.storeSecret({
+  bucketID:    "intake-2026-q2",
+  plaintext:   { case_type: "financial_fraud", evidence_ref: "ipfs://abc..." },
+  category:    "informant_submission",
+  partitionID: "sealed"
+});
+```
+
+The submission payload is sealed client-side (AES-GCM) before the canonical write. The ABCI layer writes only ciphertext to List 1. The submitter's identity hash lands on List 2 with no join key to List 1.
+
+## Reveal a submission (operator-gated)
+
+```js
+const plain = await client.revealAndDecryptSecret({ secretID, bucketID });
+```
+
+Reveal is identity-gated at the reconciling authority. The operator cannot enumerate submissions — per-participant, per-secret retrieval only.
+
+## Dispatch a confidential message
+
+```js
+const mailboxes = await client.listMailboxes();
+const mailbox   = await client.getMailbox("mbx-intake-001");
+
+await client.queueDispatch({
+  mailboxId:    "mbx-intake-001",
+  subject:      "Evidence packet",
+  body:         "Sealed off-canonical.",
+  contentClass: "report",
+  auditMode:    "delivery_commitment_only"
+});
+```
+
+The dispatch surface is the `chatClient` sub-surface. Readable content, private fields, and attachment references remain sealed off-canonical.
+
+## Underlying clients
+
+`restClient` delegates to both sub-clients directly:
+
+```js
+const store = client.getStoreClient();
+const chat  = client.getChatClient();
+```
+
+This lets operator code access the full `storeClient` and `chatClient` surfaces where needed without re-initializing.
+
+## Structural guarantee
+
+`shyrest-v1` is a **3-party sealer-governed** embodiment. There is no count-match rescission pathway — `TxTypeAuthorityRescind` is structurally unavailable. Erasure means the operator (reconciling authority) deletes the sealer key; canonical records persist but submissions become permanently undecryptable. This is the structural protection informants rely on: no operator can be compelled to produce a decryptable submission after the sealer key is deleted, because decryption is physically impossible without the key.
+
+---
+
+## Deployment guide — informant intake
+
+`shyrest-v1` is the correct contract version for whistleblower and informant intake: verified identity, structurally non-linkable submission.
+
+**Authority model:**
+
+| Authority | Role | Cannot do |
+|---|---|---|
+| Operator (newsroom / platform) | Holds sealer key; routes intake; deletes keys on erasure | Cannot link submission to source from canonical state alone |
+| IDV provider (Didit) | Verifies source identity; enables biometric re-derivation | Cannot forge submissions; cannot read sealed payloads |
+| Canonical runtime | Enforces two-list invariant | Cannot decrypt payloads; cannot join List 1 to List 2 |
+
+**shyconfig:**
+
+```json
+{
+  "contract_version": "shyrest-v1",
+  "store": {
+    "secret_categories": ["informant_submission", "evidence_ref"],
+    "recovery_mode": "operator_sealer",
+    "payload_encryption": { "mode": "participant_derived_key" }
+  },
+  "messaging": {
+    "surface_model": "mail",
+    "audit_model": "delivery_commitment_only",
+    "retention_policy": "no_retention"
+  },
+  "deployment": {
+    "submission_dispatch": "cover_traffic",
+    "cover_traffic_rate": 10
+  }
+}
+```
+
+`cover_traffic` fires dummy submissions at the configured rate — real submissions are indistinguishable from dummies at the API layer. `audit_model: "delivery_commitment_only"` means only delivery continuity appears in canonical state — no subject, content descriptor, or routing metadata.
+
+**Erasure:** operator deletes the sealer key from the off-chain linkage store. Canonical List 1 and List 2 records persist (BFT-immutable) but the payload becomes permanently undecryptable. A compelled disclosure after key deletion produces mathematically irrecoverable ciphertext.
+
+**OFAC / export:** the same jurisdictional gap analysis as [hostile-regime voting](/sdk/web/voting#hostile-regime-deployment-coercion_resistant-posture) applies — receipt store hosted in a rule-of-law jurisdiction inaccessible to a hostile government's legal process. Satisfies 31 C.F.R. § 560.540 anti-surveillance predicate.

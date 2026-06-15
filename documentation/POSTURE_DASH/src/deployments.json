@@ -1,0 +1,16 @@
+[
+  {
+    "id": "pop-u-list",
+    "name": "Pop-u-list",
+    "domain": "youinpolitics.com",
+    "postureUrl": "https://vote.youinpolitics.com/api/v1/posture",
+    "adminUrl": "https://vote.youinpolitics.com/api/v1/posture/admin"
+  },
+  {
+    "id": "seda-haqq",
+    "name": "Seda Haqq",
+    "domain": "sedahaqq.com",
+    "postureUrl": "https://REDACTED/api/v1/posture",
+    "adminUrl": "https://REDACTED/api/v1/posture/admin"
+  }
+]

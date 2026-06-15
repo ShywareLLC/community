@@ -1,0 +1,105 @@
+---
+title: financingClient
+description: Revenue-based financing for shycontracts-v1 deployments
+---
+
+## What is `financingClient.js`?
+
+`financingClient.js` is an alias module for `contractsClient.js` that re-exports all symbols under financing-oriented names. The underlying implementation is identical — `createFinancingClient` is `createContractsClient`, `assertFinancingManifest` is `assertContractsManifest`.
+
+```js
+// financingClient.js re-exports
+export {
+  CONTRACTS_MANIFEST_CONTRACT_VERSION as FINANCING_MANIFEST_CONTRACT_VERSION,
+  assertContractsManifest as assertFinancingManifest,
+  createContractsClient as createFinancingClient,
+  initializeFromShyConfig,
+} from "../embodiments/contractsClient.js"
+```
+
+Use the alias when building financing-facing products so import paths read naturally in the application context. Either import path resolves the same client.
+
+## Import
+
+```js
+import { initializeFromShyConfig } from "shyware/sdk/web/financingClient.js";
+// or equivalently:
+import { initializeFromShyConfig } from "shyware/sdk/web/contractsClient.js";
+```
+
+## Initialize
+
+Requires `contract_version: "shycontracts-v1"` in the shyconfig.
+
+```js
+const client = initializeFromShyConfig(shyconfig, {
+  getAuthHeaders: async () => ({ Authorization: `Bearer ${token}` })
+});
+
+const state = client.initialize();
+// → { contractVersion, financing, identity, requiredFlows, ... }
+```
+
+## Register a financing contract
+
+```js
+const envelope = await client.buildRegisterFinancingContract({
+  contractId:         "contract-001",
+  borrowerCommitment: borrowerAccountCommitment,
+  lenderCommitment:   lenderAccountCommitment,
+  assetId:            "usd-financing",
+  principal:          500000,
+  targetRemittance:   25000,
+  revenueShareBps:    800,
+  termMonths:         24
+});
+
+await client.submitRegisterFinancingContract(envelope.txJson);
+// or combined:
+await client.registerFinancingContract({ contractId: "contract-001", ... });
+```
+
+## Activate a contract
+
+```js
+await client.activateFinancingContract({ contractId: "contract-001" });
+```
+
+Transitions the contract from `pending` to `active`. Call after both parties confirm terms off-chain.
+
+## Submit a remittance
+
+```js
+const envelope = await client.buildFinancingRemittance({
+  contractId:        "contract-001",
+  payerCommitment:   borrowerAccountCommitment,
+  matchedAmount:     25000
+});
+
+await client.submitFinancingRemittance(envelope.txJson);
+```
+
+Remittances record operator → lender payment events on-chain. They are not anonymous transfers through shywire — they are explicit contract state updates linking a payment amount to a contract.
+
+## Read contract state
+
+```js
+const contract   = await client.getContract("contract-001");
+const remittance = await client.getRemittance("transfer-id");
+const supply     = await client.getSupply("usd-financing");
+const balance    = await client.getBalance("usd-financing", accountCommitment);
+```
+
+## Account and asset management
+
+```js
+await client.registerAsset({ assetId: "usd-financing", name: "USD Financing", decimals: 2 });
+await client.registerAccount({ walletAddress: "0xabc...", identityInput: personId });
+await client.mint({ assetId: "usd-financing", accountCommitment, amount: 500000 });
+```
+
+These are shared with `wireClient` — the financing rail uses the same account and asset primitives.
+
+## Structural guarantee
+
+The borrower and lender commitments are anonymous — `H(wallet_address)`. Counterparty relationships are not visible from canonical state alone. The conservation invariant ensures no value is created or destroyed outside declared mint and remittance operations.

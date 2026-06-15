@@ -1,0 +1,100 @@
+---
+title: Overview
+description: shyware is an anonymous and auditable distributed-ledger protocol for elections, governance, custody, financing, and value transfer
+sidebar_position: 1
+---
+
+## Three properties. One protocol.
+
+Prior distributed-ledger systems achieve at most two of the following three properties simultaneously:
+
+1. **Anonymity to peers** — submission direction, transfer amount, or contract terms are not linkable to the submitting party by any on-chain query
+2. **Auditable aggregates** — any third party can verify the tally, conservation invariant, or governance result without trusting the operator
+3. **Recovery without memorized secrets** — a participant can recover their own record, and a lawful authority can compel individual attribution, without a password, seed phrase, or any value the participant was asked to memorize
+
+**shyware achieves all three simultaneously** — through write architecture, not cryptography. The same anonymous two-list state machine underlies five product embodiments across regulated domains without re-engineering the trust model for each one.
+
+---
+
+## How it works
+
+Every submission is split at write time by a BFT ABCI state machine:
+
+```
+List 1 — anonymous submission record
+  ballot_id = H(random nonce)     ← direction/amount/choice. No identity.
+
+List 2 — participant registry record
+  H(identity ‖ scoping_id)        ← who participated. No direction or terms.
+```
+
+No join key between List 1 and List 2 is ever written to the ledger. At period close, the count-match invariant `|L1| = |L2|` is enforced and an HSM-signed dual Merkle root attestation is committed — one root over the anonymous records, one over the identity hashes, computed from disjoint element sets.
+
+Any observer can verify aggregate correctness using only the HSM's public key. Individual attribution requires the protected off-chain linkage store, accessible only under lawful process.
+
+---
+
+## Thirteen embodiments
+
+The same state machine is governed by a versioned **shyconfig** manifest. Each embodiment declares its own authority model, identity mode, signing requirements, and deployment posture — and has its own SDK client with domain-specific method names.
+
+| Contract version | Domain | Authority model | SDK client |
+|---|---|---|---|
+| `shyvoting-v1` | Anonymous elections and referenda | 4-party count-match | [`votingClient`](/sdk/web/voting) |
+| `shywire-v1` | Private value transfer | 4-party count-match | [`wireClient`](/sdk/web/wire) |
+| `shycustody-v1` | Physical commodity custody | 4-party count-match | [`custodyClient`](/sdk/web/custody) |
+| `shycontracts-v1` | Revenue-based financing | 4-party count-match | [`contractsClient`](/sdk/web/contracts) |
+| `shyshares-v1` | Weighted DAO governance | 4-party count-match | [`sharesClient`](/sdk/web/shares) |
+| `shybets-v1` | Anonymous event betting | 4-party count-match | [`betsClient`](/sdk/web/bets) |
+| `shylots-v1` | Sealed-bid auctions | 4-party count-match | [`lotsClient`](/sdk/web/lots) |
+| `shyrest-v1` | Informant stream | 4-party count-match | [`restClient`](/sdk/web/rest) |
+| `shystore-v1` | Health record vault | 3-party sealer-governed | [`storeClient`](/sdk/web/store) |
+| `shystore-v1` | Credential vault / authenticator | 3-party sealer-governed | [`storeClient`](/sdk/web/store) |
+| `shychat-v1` | Confidential mailbox | 3-party sealer-governed | [`chatClient`](/sdk/web/chat) |
+| `shybrowser-v1` | Browser analytics | 3-party sealer-governed | [`browserClient`](/sdk/web/browser) |
+| `shystream-v1` | Private streaming | 3-party sealer-governed | [`streamClient`](/sdk/web/stream) |
+
+`shywire` is the anonymous transfer rail shared by `shycustody`, `shycontracts`, `shyshares`, `shybets`, and `shylots`. Count-match embodiments expose `TxTypeAuthorityRescind` for two-party threshold erasure. Sealer-governed embodiments have no rescission pathway — erasure means the operator deletes the sealer key, making sealed payloads permanently undecryptable.
+
+---
+
+## The SDK
+
+The shyware web SDK (`shyware/sdk/web/`) is one client module per embodiment. Each is initialized from a shyconfig manifest and exposes a consistent `initialize / build / submit` interface with domain-specific method names.
+
+```js
+// Elections
+import { initializeFromShyConfig } from 'shyware/sdk/web/votingClient.js'
+const client = initializeFromShyConfig(shyconfig, { getAuthHeaders })
+await client.castBallot({ pollId, choice: 'yes', personId })
+
+// Value transfer
+import { initializeFromShyConfig } from 'shyware/sdk/web/wireClient.js'
+const client = initializeFromShyConfig(shyconfig, { getAuthHeaders })
+await client.buildTransfer({ senderCommitment, recipientCommitment, amount })
+
+// Secret storage
+import { initializeFromShyConfig } from 'shyware/sdk/web/storeClient.js'
+const client = initializeFromShyConfig(shyconfig, { getAuthHeaders, deriveSealerKey, signMessage })
+await client.storeSecret({ bucketID, plaintext, category })
+
+// Sealed-bid auctions
+import { initializeFromShyConfig } from 'shyware/sdk/web/lotsClient.js'
+const client = initializeFromShyConfig(shyconfig, { getAuthHeaders })
+await client.transferBidBond({ senderCommitment, recipientCommitment, amount })
+```
+
+The Go runtime (`github.com/NickCarducci/Shyware-SDK`) is the ABCI state machine, signing layer, and ZK verifier. The web SDK communicates with it through the REST API. Each embodiment's API endpoints are distinct — see the per-client pages linked above.
+
+---
+
+## Current posture
+
+This docs site is intentionally compact while the fuller SDK reference and deployment materials are being staged for public release. The underlying protocol, embodiment examples, and integration guides are being organized into a cleaner public packet.
+
+## Request access
+
+For pilot conversations, private walkthroughs, or licensing inquiries: [legal@shyware.fyi](mailto:legal@shyware.fyi)
+
+
+

@@ -1,0 +1,1430 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shyware.fyi/schema/shyconfig.schema.json",
+  "title": "shyconfig",
+  "description": "Operator drop-in manifest for products built on the shyware anonymous layer. Contains only operator-specific values \u2014 SDK behaviour is derived from contract_version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "app",
+    "domains",
+    "api",
+    "identity",
+    "signing"
+  ],
+  "properties": {
+    "receipts": {
+      "type": "object",
+      "description": "Receipt storage, access, and recovery policy for shyvoting-v1 and similar products. Enables config-driven control of match store, user access, double vote enforcement, and recovery signals.",
+      "properties": {
+        "match_store": {
+          "type": "string",
+          "enum": [
+            "cockroach_encrypted",
+            "firestore",
+            "none"
+          ],
+          "description": "Where receipts are stored. Default: cockroach_encrypted."
+        },
+        "user_access": {
+          "type": "string",
+          "enum": [
+            "gated_recovery",
+            "unrestricted",
+            "none"
+          ],
+          "description": "How users can access their receipts. Default: gated_recovery."
+        },
+        "double_vote_enforcement": {
+          "type": "string",
+          "enum": [
+            "voter_registry_only",
+            "strict",
+            "none"
+          ],
+          "description": "How double voting is enforced. Default: voter_registry_only."
+        },
+        "recovery_signals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Signals required for recovery (e.g., device_integrity, didit_recheck, web_session_approval)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "description": "Execution adapters and queueing for governance actions (shyshares-v1).",
+      "additionalProperties": false,
+      "properties": {
+        "default_mode": {
+          "type": "string"
+        },
+        "adapters": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "canonical_queue": {
+          "type": "boolean"
+        }
+      }
+    },
+    "contract_version": {
+      "type": "string",
+      "description": "Protocol version governing state machine behavior, tx types, and required config blocks.",
+      "enum": [
+        "shyvoting-v1",
+        "shywire-v1",
+        "shycustody-v1",
+        "shylots-v1",
+        "shycontracts-v1",
+        "shyshares-v1",
+        "shystore-v1",
+        "shybets-v1",
+        "shystream-v1",
+        "shybrowser-v1",
+        "shychat-v1",
+        "shyrest-v1"
+      ]
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "chain_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chain_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "network_type": {
+          "type": "string",
+          "enum": [
+            "public",
+            "permissioned",
+            "private"
+          ],
+          "description": "Consensus network posture. public: open validator set (e.g. Cosmos mainnet). permissioned: known validator set, restricted membership. private: single-operator or TEE-backed state machine; no external validator trust assumptions. Default: public."
+        },
+        "product_type": {
+          "type": "string",
+          "enum": [
+            "shyvoting",
+            "shychat",
+            "shyrest",
+            "shycontracts",
+            "shycustody",
+            "shywire",
+            "shyshares",
+            "shylots",
+            "shystore",
+            "shybets",
+            "shystream",
+            "shybrowser"
+          ]
+        }
+      }
+    },
+    "domains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "public"
+      ],
+      "properties": {
+        "public": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "splash"
+          ],
+          "properties": {
+            "splash": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "private": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "console": {
+              "type": "string",
+              "minLength": 1
+            },
+            "vote": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_url"
+      ],
+      "properties": {
+        "base_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "submit_base_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth_scheme": {
+          "type": "string",
+          "description": "Omit for unauthenticated deployments (SDK default: none).",
+          "enum": [
+            "firebase_bearer",
+            "app_attest",
+            "bearer",
+            "none"
+          ]
+        },
+        "posture_endpoint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allow_user_posture_override": {
+          "type": "boolean"
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "didit",
+            "identus",
+            "wallet",
+            "none"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "stable_person_id",
+            "wallet_commitment",
+            "manual_demo"
+          ]
+        },
+        "kyc_required": {
+          "type": "boolean"
+        },
+        "recommended_idv": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "issuer_did": {
+          "type": "string"
+        },
+        "issuer_pubkey_hex": {
+          "type": "string",
+          "description": "Hex-encoded Ed25519 public key for server-side IDV attestation verification. Required for identus and didit providers at the ABCI layer."
+        },
+        "surface_model": {
+          "type": "string",
+          "enum": [
+            "mail",
+            "chat"
+          ]
+        },
+        "account_model": {
+          "type": "string",
+          "enum": [
+            "single_account",
+            "multi_account"
+          ]
+        },
+        "participant_binding": {
+          "type": "string"
+        },
+        "byoid_policy": {
+          "type": "string",
+          "description": "SDK default: allowed",
+          "enum": [
+            "disallowed",
+            "allowed",
+            "required"
+          ]
+        },
+        "byoid_label": {
+          "type": "string"
+        },
+        "presentation_mode": {
+          "type": "string",
+          "enum": [
+            "proof_hash",
+            "credential_commitment",
+            "wallet_signature"
+          ]
+        },
+        "high_risk_region_blocklist": {
+          "type": "array",
+          "description": "ISO 3166-1 alpha-2 country codes. SDK default: []",
+          "items": {
+            "type": "string",
+            "minLength": 2
+          }
+        }
+      }
+    },
+    "anon_layer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sdk_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "black_box_required": {
+          "type": "boolean"
+        },
+        "shyPayload": {
+          "type": "boolean",
+          "description": "When true, seal payload-side content before commit when supported by the SDK/client."
+        },
+        "shyIDV": {
+          "type": "boolean",
+          "description": "When true, seal identity-side attributes before commit when supported by the SDK/client."
+        },
+        "submission_identifier_derivation": {
+          "type": "string",
+          "enum": [
+            "nonce_only",
+            "nonce_plus_payload"
+          ],
+          "description": "Submission identifier derivation mode. nonce_only (default) derives identifier from nonce; nonce_plus_payload enables prophetic embodiment deriving identifier from nonce and canonicalized payload."
+        },
+        "required_flows": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "shyPayload": {
+      "type": "boolean",
+      "description": "Root-level alias for anon_layer.shyPayload."
+    },
+    "shyIDV": {
+      "type": "boolean",
+      "description": "Root-level alias for anon_layer.shyIDV."
+    },
+    "signing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "backend": {
+          "type": "string",
+          "enum": [
+            "aws_kms",
+            "aws_kms_x_aws_cloudhsm",
+            "local_ed25519",
+            "none"
+          ]
+        },
+        "validator_key_id": {
+          "type": "string"
+        },
+        "tally_key_id": {
+          "type": "string"
+        },
+        "contract_key_id": {
+          "type": "string"
+        },
+        "external_hsm": {
+          "type": "string",
+          "enum": [
+            "aws_cloudhsm"
+          ]
+        },
+        "external_hsm_key_name": {
+          "type": "string"
+        },
+        "external_hsm_uri": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "backend": {
+                "enum": [
+                  "aws_kms",
+                  "aws_kms_x_aws_cloudhsm"
+                ]
+              }
+            },
+            "required": [
+              "backend"
+            ]
+          },
+          "then": {
+            "required": [
+              "validator_key_id",
+              "tally_key_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "backend": {
+                "const": "aws_kms_x_aws_cloudhsm"
+              }
+            },
+            "required": [
+              "backend"
+            ]
+          },
+          "then": {
+            "required": [
+              "external_hsm",
+              "external_hsm_key_name",
+              "external_hsm_uri"
+            ]
+          }
+        }
+      ]
+    },
+    "deployment": {
+      "type": "object",
+      "description": "Override SDK posture defaults. SDK default_posture: recoverable. SDK runtime_fallbacks: true for shyvoting/shycontracts, false for all others.",
+      "additionalProperties": false,
+      "properties": {
+        "deployment_tier": {
+          "type": "string",
+          "enum": [
+            "community",
+            "hosted_dedicated",
+            "self_hosted"
+          ],
+          "description": "Commercial posture for the deployment. community = shared shyware-operated tenant environment; hosted_dedicated = tenant-dedicated chain or service still run by shyware or another operator; self_hosted = tenant runs its own infrastructure."
+        },
+        "ledger_tenancy": {
+          "type": "string",
+          "enum": [
+            "shared",
+            "dedicated"
+          ],
+          "description": "Whether canonical ledger state is committed to a shared multi-tenant chain or a tenant-dedicated chain."
+        },
+        "service_hosting": {
+          "type": "string",
+          "enum": [
+            "shyware_hosted",
+            "tenant_hosted"
+          ],
+          "description": "Who runs the operator-facing service layer such as APIs, consoles, dispatch endpoints, or reconcile services."
+        },
+        "reconcile_mode": {
+          "type": "string",
+          "enum": [
+            "operator_read_only",
+            "user_only",
+            "disabled"
+          ],
+          "description": "High-level reconcile posture. operator_read_only = authority-gated service-side reconcile allowed; user_only = no operator-side reconcile authority, user-held recovery only; disabled = no reconcile path."
+        },
+        "default_posture": {
+          "type": "string",
+          "enum": [
+            "recoverable",
+            "coercion_resistant"
+          ]
+        },
+        "attestation": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Controls when cryptographic attestations over the two-list state are committed. Default mode: rolling.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "rolling",
+                "period_close",
+                "none"
+              ],
+              "description": "rolling (default): attest every rolling_threshold submissions. period_close: attest only at explicit close. none: no attestation \u2014 structural anonymity and recovery preserved but operator-independent verifiability is not available."
+            },
+            "rolling_threshold": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Submissions between rolling attestations. Only used when mode=rolling. Default: 100."
+            }
+          }
+        },
+        "web_session_approval": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional browser-session approval policy for recoverable web deployments. This is a narrower trust signal than mobile attestation and is intended only for declared receipt or recovery functions.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "session_ttl_minutes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "allowed_functions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "receipt_readback",
+                  "recovery_initiation",
+                  "receipt_confirmation"
+                ]
+              }
+            }
+          }
+        },
+        "runtime_fallbacks": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "write_only_on_missing_play_integrity": {
+              "type": "boolean"
+            },
+            "write_only_on_hostile_network": {
+              "type": "boolean"
+            },
+            "write_only_on_untrusted_device_attestation": {
+              "type": "boolean"
+            },
+            "write_only_on_hsm_unavailable": {
+              "type": "boolean"
+            },
+            "write_only_on_missing_web_session_approval": {
+              "type": "boolean"
+            }
+          }
+        },
+        "submission_dispatch": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "batch_queue",
+            "cover_traffic"
+          ],
+          "description": "direct: canonical writes commit immediately \u2014 1:1 timing of each submission is observable. batch_queue: real submissions are queued and flushed together; k submissions per block window; latency is the mechanism; no dummy transactions; degenerate at k=1. cover_traffic: EC2 generates or accepts dummy submissions at a configurable rate alongside real ones; dummies are filtered at the EC2 before ABCI broadcast and never reach canonical state; count-match is always correct; timing oracle at the API layer sees a continuous indistinguishable stream; no latency penalty. cover_traffic is the preferred mode for timing-correlation protection."
+        },
+        "cover_traffic_rate": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Dummy submissions per minute generated by the EC2 when submission_dispatch is cover_traffic. Higher rate = stronger timing protection at the cost of EC2 compute. Default: 10."
+        }
+      }
+    },
+    "messaging": {
+      "type": "object",
+      "description": "Required for shychat-v1. Controls the messaging payload model, audit surface, allowed formats, and mailbox lifecycle semantics.",
+      "additionalProperties": false,
+      "properties": {
+        "payload_model": {
+          "type": "string",
+          "enum": [
+            "sealed_private_content"
+          ],
+          "description": "sealed_private_content: message body and subject are AES-GCM encrypted before List 1 commit; operator cannot read content."
+        },
+        "audit_model": {
+          "type": "string",
+          "enum": [
+            "delivery_commitment_only",
+            "delivery_metadata_commitment"
+          ],
+          "description": "delivery_commitment_only: only submission counts and merkle roots are verifiable; delivery_metadata_commitment: delivery window and content class are committed in a sealed metadata envelope."
+        },
+        "allowed_payload_formats": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Allowed content format strings. E.g. mail_text, mail_html, chat_text, chat_image_ref."
+        },
+        "mailbox_model": {
+          "type": "string",
+          "enum": [
+            "single_mailbox",
+            "multi_mailbox"
+          ],
+          "description": "single_mailbox: one mailbox per participant identity (mail). multi_mailbox: multiple named mailboxes per identity (chat)."
+        },
+        "delivery_model": {
+          "type": "string",
+          "enum": [
+            "dispatch_queue",
+            "direct"
+          ],
+          "description": "dispatch_queue (default): messages are queued and batch-flushed. direct: synchronous dispatch."
+        },
+        "retention_policy": {
+          "type": "string",
+          "enum": [
+            "no_retention",
+            "mailbox_lifetime"
+          ],
+          "description": "no_retention: message payloads are not stored off-chain after commit. mailbox_lifetime: payloads retained until mailbox close."
+        }
+      }
+    },
+    "custody": {
+      "type": "object",
+      "description": "Required for shycustody-v1 and shyshares-v1 with custody governance. Operator-specific commodity/custody parameters only.",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "accepted_sku_whitelist",
+        "unit_of_measure",
+        "evidence_requirements"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy_source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accepted_sku_whitelist": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "unit_of_measure": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity_normalization": {
+          "type": "string",
+          "minLength": 1
+        },
+        "demurrage_policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator_mint_burn": {
+          "type": "boolean"
+        },
+        "redemption_mode": {
+          "type": "string",
+          "minLength": 1
+        },
+        "redemption_routing": {
+          "type": "string",
+          "minLength": 1
+        },
+        "transfer_layer": {
+          "type": "string",
+          "enum": [
+            "shywire"
+          ]
+        },
+        "evidence_requirements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "camera_session_ref",
+              "operator_receipt_ref",
+              "kyc_attestation_ref",
+              "shipping_ref"
+            ]
+          }
+        }
+      }
+    },
+    "financing": {
+      "type": "object",
+      "description": "Required for shycontracts-v1. Operator-specific financing parameters only.",
+      "additionalProperties": false,
+      "required": [
+        "return_basis",
+        "remittance_source_mode",
+        "funding_mode",
+        "transfer_layer"
+      ],
+      "properties": {
+        "return_basis": {
+          "type": "string",
+          "enum": [
+            "project_profit",
+            "customer_revenue",
+            "eligible_income"
+          ]
+        },
+        "remittance_source_mode": {
+          "type": "string",
+          "enum": [
+            "matched_customer_revenue",
+            "matched_withdrawal",
+            "matched_income"
+          ]
+        },
+        "funding_mode": {
+          "type": "string",
+          "enum": [
+            "single_lender",
+            "staggered_waitlist",
+            "shared_financing"
+          ]
+        },
+        "transfer_layer": {
+          "type": "string",
+          "enum": [
+            "shywire"
+          ],
+          "description": "Transfer rail for contract stake transfers. Must be shywire."
+        }
+      }
+    },
+    "wire": {
+      "type": "object",
+      "description": "Required for shywire-v1. Operator-specific stablecoin/rail parameters only.",
+      "additionalProperties": false,
+      "required": [
+        "asset_id",
+        "issuer_name",
+        "backing_asset",
+        "provider",
+        "provider_config",
+        "supported_networks"
+      ],
+      "properties": {
+        "asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "issuer_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "backing_asset": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "circle_usdc",
+            "custom"
+          ]
+        },
+        "provider_config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "intent_path",
+            "settlement_asset",
+            "supported_rails",
+            "requires_operator_review"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "sandbox",
+                "live"
+              ]
+            },
+            "intent_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "settlement_asset": {
+              "type": "string",
+              "minLength": 1
+            },
+            "supported_rails": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "blockchain",
+                  "ach",
+                  "wire"
+                ]
+              }
+            },
+            "requires_operator_review": {
+              "type": "boolean"
+            }
+          }
+        },
+        "supported_networks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "enrollment_authority_pubkey_base64": {
+          "type": "string",
+          "description": "Optional Ed25519 public key for single-use enrollment authorizations. When present, RegisterAccount requires a valid enrollment token and signature in addition to wallet ownership proof."
+        },
+        "settlement_dispatch": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "batch_queue",
+            "cover_traffic"
+          ],
+          "description": "direct: canonical writes commit immediately \u2014 1:1 timing of each transfer is observable. batch_queue: real wire transfers are queued and flushed together; k wire transfers per block window; latency is the mechanism; no dummy transactions; degenerate at k=1. cover_traffic: EC2 generates or accepts dummy wire transfers at a configurable rate alongside real ones; dummies are filtered at the EC2 before ABCI broadcast and never reach canonical state; count-match is always correct; timing oracle at the API layer sees a continuous indistinguishable stream; no latency penalty. cover_traffic is the preferred mode for timing-correlation protection."
+        }
+      }
+    },
+    "lots": {
+      "type": "object",
+      "description": "Required for shylots-v1. Declares private auctions/lot-market semantics while composing shycustody inventory and shywire settlement.",
+      "additionalProperties": false,
+      "required": [
+        "market_operator",
+        "sale_modes",
+        "open_mode",
+        "bid_visibility",
+        "reserve_funding_mode",
+        "settlement_asset_id"
+      ],
+      "properties": {
+        "market_operator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sale_modes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "sealed_bid",
+              "reverse_auction",
+              "fixed_close_offer"
+            ]
+          }
+        },
+        "open_mode": {
+          "type": "string",
+          "enum": [
+            "operator_attested_close",
+            "scheduled_close",
+            "threshold_open_reserved"
+          ]
+        },
+        "bid_visibility": {
+          "type": "string",
+          "enum": [
+            "sealed_until_close",
+            "sealed_until_award"
+          ]
+        },
+        "reserve_funding_mode": {
+          "type": "string",
+          "enum": [
+            "bid_bond_transfer",
+            "operator_escrow",
+            "intent_preclear"
+          ]
+        },
+        "settlement_asset_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bidder_identity_mode": {
+          "type": "string",
+          "enum": [
+            "anonymous_commitment",
+            "credential_gated_commitment",
+            "operator_allowlisted_commitment"
+          ]
+        },
+        "evidence_mode": {
+          "type": "string",
+          "enum": [
+            "custody_refs",
+            "shycam_refs",
+            "mixed"
+          ]
+        },
+        "redemption_surface": {
+          "type": "string",
+          "enum": [
+            "custody_request",
+            "operator_dispatch"
+          ]
+        },
+        "dispute_window_hours": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "settlement_dispatch": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "batch_queue",
+            "cover_traffic"
+          ],
+          "description": "direct: canonical writes commit immediately \u2014 1:1 timing of each settlement is observable. batch_queue: real lot settlements are queued and flushed together; k lot settlements per block window; latency is the mechanism; no dummy transactions; degenerate at k=1. cover_traffic: EC2 generates or accepts dummy lot settlements at a configurable rate alongside real ones; dummies are filtered at the EC2 before ABCI broadcast and never reach canonical state; count-match is always correct; timing oracle at the API layer sees a continuous indistinguishable stream; no latency penalty. cover_traffic is the preferred mode for timing-correlation protection."
+        }
+      }
+    },
+    "store": {
+      "type": "object",
+      "description": "Required for shystore-v1. Governs encrypted personal secret storage: authentication seeds, health records, and general personal secrets. Payloads never appear in canonical state.",
+      "additionalProperties": false,
+      "required": [
+        "secret_categories",
+        "payload_encryption",
+        "recovery_mode"
+      ],
+      "properties": {
+        "secret_categories": {
+          "type": "array",
+          "description": "Which secret categories this deployment accepts.",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "auth_seed_totp",
+              "auth_seed_fido2",
+              "health_record",
+              "health_record_era",
+              "password",
+              "document",
+              "arbitrary",
+              "review_submission",
+              "incident_report",
+              "feedback",
+              "grievance",
+              "whistleblower",
+              "contest_entry",
+              "ip_submission",
+              "stream_event",
+              "stream_clip",
+              "stream_chat_event"
+            ]
+          }
+        },
+        "sealer": {
+          "type": "object",
+          "description": "Optional. Sealer/oracle configuration for PII/high-risk payloads. Not required for protocol operation, but may be used by SDK extensions.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "sealed_storage"
+              ]
+            },
+            "description": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "payload_encryption": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "kdf"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "participant_derived_key"
+              ],
+              "description": "participant_derived_key: encryption key derived from participant private value; operator cannot decrypt."
+            },
+            "kdf": {
+              "type": "string",
+              "enum": [
+                "hkdf_sha256"
+              ],
+              "description": "Key derivation function for per-record encryption keys."
+            }
+          }
+        },
+        "recovery_mode": {
+          "type": "string",
+          "enum": [
+            "biometric_rederivation",
+            "operator_sealer"
+          ],
+          "description": "biometric_rederivation: IDV re-derives participant private value on any device from biometric challenge; no memorized secret required. operator_sealer: reconciling authority holds the sealer key; recovery is re-authentication via the account layer (Cognito) \u2014 the authority re-issues the sealer key on authenticated request. Appropriate when the data source is re-pullable (e.g. FHIR EHR) and biometric IDV is not warranted."
+        },
+        "selective_disclosure": {
+          "type": "boolean",
+          "description": "Whether to generate per-record disclosure keys enabling a participant to share one record without disclosing others or the master private value. Default: false."
+        },
+        "enumeration_protection": {
+          "type": "string",
+          "enum": [
+            "structural"
+          ],
+          "description": "structural: no system-defined operation over canonical state yields an enrollment catalog, record count per participant, or record category per participant."
+        },
+        "ehr_provider": {
+          "type": "string",
+          "description": "Optional: name of the EHR / ERA provider integration (e.g. 'epic', 'cerner', 'cms_era'). Only relevant when secret_categories includes health_record or health_record_era."
+        }
+      }
+    },
+    "stream": {
+      "type": "object",
+      "description": "Required for shystream-v1. Streaming/media operator parameters layered on top of shystore-style sealed payload handling.",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "ingestion_mode",
+        "default_visibility"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "mux",
+            "custom"
+          ]
+        },
+        "ingestion_mode": {
+          "type": "string",
+          "enum": [
+            "live",
+            "vod",
+            "hybrid"
+          ]
+        },
+        "default_visibility": {
+          "type": "string",
+          "enum": [
+            "unlisted",
+            "private",
+            "public"
+          ]
+        },
+        "playback_domain": {
+          "type": "string",
+          "minLength": 1
+        },
+        "webhook_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "description": "Required for shyshares-v1. Controls proposal creation authority, voter eligibility, and vote weight. Applies to DAO governance (BIGGLOM) and custody consortium governance (VAULTS_BIZ) alike.",
+      "additionalProperties": false,
+      "required": [
+        "poll_create_authority",
+        "membership_sources",
+        "proposal_classes",
+        "eligibility",
+        "vote_weight"
+      ],
+      "properties": {
+        "weighting_mode": {
+          "type": "string",
+          "description": "How voting weight is determined (e.g., delegated_stake_snapshot)."
+        },
+        "privacy_mode": {
+          "type": "string",
+          "description": "Privacy guarantees for governance voting (e.g., direction_and_weight_unlinkable)."
+        },
+        "transfer_layer": {
+          "type": "string",
+          "enum": [
+            "shywire"
+          ],
+          "description": "Transfer rail for governance token and stake transfers. Must be shywire."
+        },
+        "poll_create_authority": {
+          "type": "string",
+          "enum": [
+            "any_holder",
+            "operator_or_board"
+          ],
+          "description": "Who may submit PollCreate txs. 'any_holder' = any eligible token holder (DAO model). 'operator_or_board' = whitelisted operator/board Ed25519 keys only (custody consortium model)."
+        },
+        "authority_keys": {
+          "type": "array",
+          "description": "Hex-encoded Ed25519 public keys for the consortium board/coordinator. PollCreate txs signed by these keys are tagged creator_type=authority. Any holder may still create polls.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "house_keys": {
+          "type": "array",
+          "description": "Hex-encoded Ed25519 public keys for the warehouse/vault owner (the house). A house is a person, partnership, or verified entity with beneficial-ownership attestation. May operate multiple warehouse locations. PollCreate txs signed by these keys are tagged creator_type=house.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "membership_sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "token_balance",
+              "delegation",
+              "allowlist"
+            ]
+          }
+        },
+        "proposal_classes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "payout",
+              "parameter_change",
+              "role_change",
+              "delegate_change",
+              "arbitrary_execution",
+              "custody_policy",
+              "warehouse_operator",
+              "accepted_sku_class"
+            ]
+          }
+        },
+        "eligibility": {
+          "type": "object",
+          "description": "Defines who is eligible to vote. asset_id must reference an asset in the wire sub-state.",
+          "required": [
+            "asset_id",
+            "min_balance"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "asset_id": {
+              "type": "string"
+            },
+            "min_balance": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "vote_weight": {
+          "type": "string",
+          "enum": [
+            "token_quantity",
+            "one_per_holder"
+          ],
+          "description": "'token_quantity' = stake-weighted by asset balance (silo kg, DAO token count). 'one_per_holder' = one vote per eligible holder regardless of balance."
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "description": "Data retention and deletion schedule. Required before production. Populates Art. 30(1)(f) of the Records of Processing generated by shyware generate-rop.",
+      "additionalProperties": false,
+      "required": [
+        "canonical_records_days",
+        "off_chain_linkage_days",
+        "deletion_cron",
+        "basis"
+      ],
+      "properties": {
+        "canonical_records_days": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Days to retain canonical ledger records after scoping-identifier close. Counts from period-close attestation timestamp."
+        },
+        "off_chain_linkage_days": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Days to retain off-chain linkage store records. Must be <= canonical_records_days for consistency."
+        },
+        "idv_records_days": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Days to retain IDV attestation records. Governed by IDV provider DPA \u2014 confirm with IDV sub-processor."
+        },
+        "deletion_cron": {
+          "type": "string",
+          "description": "Cron expression for automated deletion job (e.g. '0 2 * * *' for 2am daily). Must be operationally enforced \u2014 not verifiable by unit assertions alone."
+        },
+        "legal_hold_enabled": {
+          "type": "boolean",
+          "description": "Whether legal hold can suspend automated deletion. If true, operator must implement hold/release workflow."
+        },
+        "basis": {
+          "type": "string",
+          "description": "Legal basis for the retention period (e.g. 'financial records \u2014 7 years per local law', 'contract performance \u2014 duration + 3 years'). Operator must fill per jurisdiction."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shycontracts-v1"
+          }
+        },
+        "required": [
+          "contract_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "financing"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shycustody-v1"
+          }
+        },
+        "required": [
+          "contract_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "custody"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shywire-v1"
+          }
+        },
+        "required": [
+          "contract_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "wire"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shystore-v1"
+          }
+        },
+        "required": [
+          "contract_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "store"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shyshares-v1"
+          }
+        },
+        "required": [
+          "contract_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "governance"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shychat-v1"
+          }
+        },
+        "required": [
+          "contract_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "messaging"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shystream-v1"
+          }
+        },
+        "required": [
+          "contract_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "store",
+          "stream"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shyrest-v1"
+          }
+        },
+        "required": [
+          "contract_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "store",
+          "messaging"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shylots-v1"
+          }
+        },
+        "required": [
+          "contract_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "custody",
+          "wire",
+          "lots"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "app": {
+            "properties": {
+              "product_type": {
+                "const": "shylots"
+              }
+            },
+            "required": [
+              "product_type"
+            ]
+          }
+        },
+        "required": [
+          "app"
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract_version": {
+            "const": "shylots-v1"
+          }
+        },
+        "required": [
+          "contract_version",
+          "custody",
+          "wire",
+          "lots"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "contract_version": {
+            "const": "shyshares-v1"
+          },
+          "governance": {
+            "properties": {
+              "poll_create_authority": {
+                "const": "operator_or_board"
+              }
+            },
+            "required": [
+              "poll_create_authority"
+            ]
+          }
+        },
+        "required": [
+          "contract_version",
+          "governance"
+        ]
+      },
+      "then": {
+        "required": [
+          "custody"
+        ]
+      }
+    }
+  ]
+}

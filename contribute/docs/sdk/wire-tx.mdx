@@ -1,0 +1,146 @@
+---
+title: tx — wire / transfer
+description: Transaction types and wire-format encoding for the transfer embodiments
+---
+
+Package `tx` encodes and validates transfer-embodiment transactions.
+Import path: `github.com/NickCarducci/Shyware-SDK/shywire/tx`
+
+---
+
+## Transaction envelope
+
+All transfer transactions share the same envelope, aligned with the broader
+shyware runtime contract:
+
+```go
+type Tx struct {
+    Type      uint8           `json:"type"`
+    Signature []byte          `json:"signature"`
+    Data      json.RawMessage `json:"data"`
+}
+```
+
+`Type` is the wire-format discriminator. `Signature` authenticates the transaction
+(operator ECDSA for admin txs; wallet ECDSA for user txs). `Data` is the type-specific payload.
+
+---
+
+## Transaction types
+
+| Constant | Value | Sender | Purpose |
+|---|---|---|---|
+| `TxTypeRegisterAsset` | 1 | Operator | Register a new asset type |
+| `TxTypeMint` | 2 | Operator | Mint supply to an account |
+| `TxTypeBurn` | 3 | Operator | Burn supply from an account |
+| `TxTypeTransfer` | 4 | User | Anonymous transfer between accounts |
+| `TxTypeRegisterAccount` | 5 | User | Register an account commitment on-chain |
+| `TxTypeRegisterValidator` | 6 | Operator | Add or remove a consensus validator |
+
+Operator transactions (1–3, 6) are signed with the validator key. User transactions (4–5)
+are signed with the user's wallet key.
+
+---
+
+## RegisterAssetData
+
+```go
+type RegisterAssetData struct {
+    AssetID  string `json:"asset_id"`  // e.g. "usdc", "usd", "gov-token"
+    Name     string `json:"name"`
+    Decimals uint8  `json:"decimals"`  // precision; 6 for USDC-equivalent
+}
+```
+
+Only the operator may register assets. `AssetID` is immutable after registration.
+
+---
+
+## MintData / BurnData
+
+```go
+type MintData struct {
+    AssetID           string `json:"asset_id"`
+    AccountCommitment string `json:"account_commitment"` // recipient: H(wallet_address)
+    Amount            int64  `json:"amount"`
+    Timestamp         int64  `json:"timestamp"`
+}
+
+type BurnData struct {
+    AssetID           string `json:"asset_id"`
+    AccountCommitment string `json:"account_commitment"` // source account
+    Amount            int64  `json:"amount"`
+    Timestamp         int64  `json:"timestamp"`
+}
+```
+
+Mint increases `TotalMinted` and credits the account. Burn increases `TotalBurned` and debits
+the account. Both enforce `TotalSupply == TotalMinted - TotalBurned`.
+
+---
+
+## TransferData
+
+The core transaction type. Implements the two-list invariant for anonymous transfers.
+
+```go
+type TransferData struct {
+    AssetID             string `json:"asset_id"`
+    SenderCommitment    string `json:"sender_commitment"`    // H(sender_wallet_address)
+    RecipientCommitment string `json:"recipient_commitment"` // H(recipient_wallet_address)
+    Amount              int64  `json:"amount"`               // TODO(circuit): AmountCommitment
+    Nullifier           string `json:"nullifier"`            // H(wallet_address, transfer_id)
+    TransferNonce       string `json:"transfer_nonce"`       // random; transfer_id = H(nonce)
+    SenderProof         []byte `json:"sender_proof"`         // TODO(circuit): Pedersen range proof
+    Timestamp           int64  `json:"timestamp"`
+}
+```
+
+**Two-list derivation:**
+- `TransferNonce` → `transfer_id = H(TransferNonce)` → stored in List 1 (`TransferRecord`)
+- `Nullifier = H(wallet_address, transfer_id)` → stored in List 2 (`ParticipantRecord`)
+
+These two values share no derivation path. Joining them requires the sender's wallet address.
+
+**`TODO(circuit)` fields:**
+`Amount` is currently plaintext. `SenderProof` is reserved for the Pedersen range proof
+that will prove `balance >= amount` without revealing either value. Until the circuit is built,
+`SenderProof` may be omitted and the canonical runtime checks plaintext balances.
+
+---
+
+## RegisterAccountData
+
+```go
+type RegisterAccountData struct {
+    AccountCommitment string `json:"account_commitment"` // H(wallet_address)
+    WalletProof       []byte `json:"wallet_proof"`       // ECDSA sig proving wallet ownership
+}
+```
+
+Must be submitted before an account can send or receive transfers. `WalletProof` is an ECDSA
+signature by the wallet private key over a canonical message (implementation-defined; see API docs).
+The wallet address itself is never stored on-chain.
+
+---
+
+## Encoding / decoding
+
+```go
+// DecodeTx deserializes a JSON-encoded transaction.
+func DecodeTx(txBytes []byte) (*Tx, error)
+
+// EncodeTx serializes a transaction to JSON.
+func EncodeTx(t *Tx) ([]byte, error)
+
+// Validate performs stateless checks: valid type, non-empty signature and data,
+// required fields present for the specific type.
+func (t *Tx) Validate() error
+
+// UnmarshalData deserializes t.Data into the provided value.
+func (t *Tx) UnmarshalData(v interface{}) error
+```
+
+`Validate` is stateless — it does not check balances, nullifier uniqueness, or
+asset existence. Those checks happen in `state.ExecuteTransfer` during block
+execution.

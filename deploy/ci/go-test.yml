@@ -1,0 +1,116 @@
+name: Go Tests — shyvoting
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'shyware/**/*.go'
+      - 'shyware/**/go.mod'
+      - 'shyware/**/go.sum'
+      - 'go.work'
+      - 'shyware/deploy/ci/go-test.yml'
+  pull_request:
+    paths:
+      - 'shyware/**/*.go'
+      - 'shyware/**/go.mod'
+      - 'shyware/**/go.sum'
+      - 'go.work'
+      - 'shyware/deploy/ci/go-test.yml'
+
+env:
+  GO_VERSION: '1.22'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - module: shyware
+            path: shyware
+          - module: shyvoting
+            path: shyware/shyvoting
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            shyware/go.sum
+            shyware/shyvoting/go.sum
+
+      - name: Download dependencies
+        run: go mod download
+        working-directory: ${{ matrix.path }}
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+        working-directory: ${{ matrix.path }}
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "Coverage: ${COVERAGE}%"
+          if [ "$(echo "$COVERAGE < 60" | bc)" = "1" ]; then
+            echo "Coverage is below 60% threshold"
+            exit 1
+          fi
+        working-directory: ${{ matrix.path }}
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.module }}
+          path: ${{ matrix.path }}/coverage.out
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: golangci-lint — shyware
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          working-directory: shyware
+          args: --timeout=5m
+      - name: golangci-lint — shyvoting
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          working-directory: shyware/shyvoting
+          args: --timeout=5m
+
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - binary: shyvoting-abci
+            cmd: ./shyware/shyvoting/cmd/shyvoting-abci
+          - binary: shyvoting-api
+            cmd: ./shyware/shyvoting/cmd/shyvoting-api
+          - binary: shyvoting-verify
+            cmd: ./shyware/shyvoting/cmd/shyvoting-verify
+          - binary: shyvoting-affinities
+            cmd: ./shyware/shyvoting/cmd/shyvoting-affinities
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build ${{ matrix.binary }}
+        run: |
+          CGO_ENABLED=0 go build \
+            -ldflags="-s -w" \
+            -o ${{ matrix.binary }} \
+            ${{ matrix.cmd }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: ${{ matrix.binary }}

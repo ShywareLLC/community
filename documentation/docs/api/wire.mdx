@@ -1,0 +1,98 @@
+---
+title: wire
+description: HTTP API for shywire-v1, shycustody-v1, shycontracts-v1, and shylots-v1
+---
+
+## Base URL
+
+Configured via `shyconfig.api.base_url`.
+
+## Authentication
+
+| Tier | Endpoints | Auth |
+|---|---|---|
+| Public | `GET /supply/{asset_id}`, `GET /transfer/{id}`, `GET /transfers/count`, custody reads, financing reads | — |
+| User | `POST /transfers`, `POST /accounts`, `GET /balance/{asset_id}/{commitment}` | Bearer token (`getAuthHeaders`) |
+| Operator | `POST /assets`, `POST /mint`, `POST /burn`, custody writes, financing writes, intent routes | Operator JWT + `operatorMode: true` |
+
+## Endpoints
+
+### Wire / transfer
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/transfers` | Execute an anonymous transfer |
+| `GET` | `/transfer/{transfer_id}` | Get a transfer record (List 1) |
+| `GET` | `/transfers/count` | Total transfer count |
+| `POST` | `/accounts` | Register an account commitment |
+| `GET` | `/balance/{asset_id}/{account_commitment}` | Account balance |
+| `POST` | `/assets` | Register an asset (operator) |
+| `GET` | `/assets/{asset_id}` | Asset metadata |
+| `GET` | `/supply/{asset_id}` | Public supply totals |
+| `POST` | `/mint` | Mint supply (operator) |
+| `POST` | `/burn` | Burn supply (operator) |
+
+### Custody
+
+| Method | Path | Description |
+|---|---|---|
+| `GET/POST` | `/custody/policies` | List / register consortium policies |
+| `GET` | `/custody/policies/current` | Active policy |
+| `GET/POST` | `/custody/operators` | List / register warehouse operators |
+| `GET/POST` | `/custody/skus` | List / register SKU classes |
+| `GET/POST` | `/custody/lots` | List / record intake lots |
+| `GET` | `/custody/lots/{id}` | Get a lot |
+| `GET/POST` | `/custody/redemptions` | List / request redemptions |
+| `POST` | `/custody/redemptions/settle` | Settle a redemption (operator) |
+
+### Financing
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/contracts` | Register a contract |
+| `POST` | `/contracts/activate` | Activate a contract |
+| `GET` | `/contracts/{id}` | Get a contract |
+| `POST` | `/contracts/executions` | Submit a contract execution |
+| `GET` | `/contracts/executions/{id}` | Get an execution record |
+
+---
+
+## POST /transfers
+
+```json
+{
+  "asset_id": "usdc",
+  "sender_commitment": "abc123...",
+  "recipient_commitment": "def456...",
+  "amount": 100000,
+  "nullifier": "xyz789...",
+  "submission_nonce": "<32-byte hex>",
+  "timestamp": 1741651200
+}
+```
+
+Response: `{ "submission_id": "9a3f...", "height": 142 }`
+
+`submission_id = H(submission_nonce)` is the only receipt — store it to prove the transfer occurred.
+
+**Errors:** `409` duplicate nullifier · `422` insufficient balance · `422` unknown asset
+
+---
+
+## GET /transfer/`{transfer_id}`
+
+```json
+{ "submission_id": "9a3f...", "asset_id": "usdc", "amount": 100000, "height": 142 }
+```
+
+Amount and asset only — no sender or recipient identity.
+
+---
+
+## GET /supply/`{asset_id}`
+
+```json
+{ "asset_id": "usdc", "total_minted": 10000000000, "total_burned": 500000000, "total_supply": 9500000000 }
+```
+
+`total_supply = total_minted - total_burned` — enforced on every mint and burn, verifiable by any party.

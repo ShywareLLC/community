@@ -1,0 +1,10 @@
+{
+  "auth" : "none — derivation-layer, no network",
+  "ledger" : "none — derivation-layer, no network",
+  "run" : "local",
+  "sections" : [
+
+  ],
+  "stack" : "5",
+  "timestamp" : "2026-05-20T21:15:42Z"
+}

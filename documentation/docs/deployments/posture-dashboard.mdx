@@ -1,0 +1,187 @@
+---
+title: Posture Dashboard
+description: Operator control panel for runtime write-only / recoverable override across shyware deployments
+---
+
+The posture dashboard is a lightweight operator control panel that lets the reconciling authority push a global posture override to any shyware deployment — forcing all clients into `write_only` or `recoverable` mode, or clearing the override to let the manifest default and runtime fallbacks govern.
+
+---
+
+## How it works
+
+Each shyware deployment exposes two posture endpoints on its API:
+
+```
+GET  /api/v1/posture        → public — returns current effective posture
+POST /api/v1/posture/admin  → operator-only — sets or clears the override
+```
+
+The dashboard polls `GET /api/v1/posture` every 30 seconds per deployment and POSTs to `POST /api/v1/posture/admin` on operator action. Cloudflare Access gates the dashboard itself and the admin write endpoint — no app-level auth code required.
+
+Client precedence when resolving posture:
+
+```
+operator override  (this dashboard)
+  > user preference  (allow_user_posture_override: true, non-hostile only)
+    > runtime fallbacks  (device attestation, hostile network)
+      > manifest default  (default_posture in shyconfig)
+```
+
+---
+
+## API contract
+
+### GET /api/v1/posture
+
+Public. Returns the current effective posture for the deployment.
+
+```json
+{
+  "posture": "write_only",
+  "source": "operator",
+  "reason": "precautionary — election day",
+  "updated_at": "2026-03-16T14:00:00Z"
+}
+```
+
+`posture` is `"write_only"`, `"recoverable"`, or `null` (no active override — manifest default governs). `source` is `"operator"`, `"manifest"`, or `"fallback"`.
+
+### POST /api/v1/posture/admin
+
+Operator-only (Cloudflare Access gated). Sets or clears the override.
+
+```json
+{ "posture": "write_only", "reason": "precautionary" }
+```
+
+To clear:
+
+```json
+{ "posture": null }
+```
+
+---
+
+## Deploying your own instance
+
+### 1. Clone the dashboard
+
+The dashboard source is at `shyware/documentation/POSTURE_DASH/`. Copy it and install dependencies:
+
+```bash
+cp -r shyware/documentation/POSTURE_DASH/ my-posture-dash/
+cd my-posture-dash/
+npm install
+```
+
+### 2. Edit deployments.json
+
+`src/deployments.json` is the only file you need to change:
+
+```json
+[
+  {
+    "id": "my-deployment",
+    "name": "My Deployment",
+    "domain": "vote.mydomain.com",
+    "postureUrl": "https://vote.mydomain.com/api/v1/posture",
+    "adminUrl": "https://vote.mydomain.com/api/v1/posture/admin"
+  }
+]
+```
+
+### 3. Build and deploy
+
+```bash
+npm run build
+```
+
+### 4. Point the subdomain
+
+Add a DNS record for `posture.yourdomain.com`. Convention is a subdomain of your deployment's root domain — `posture.vote.mydomain.com` for a voting deployment, `posture.mydomain.com` if you operate multiple deployments from one panel.
+
+### 5. Gate with Cloudflare Access
+
+In Cloudflare Zero Trust → Access → Applications, create two applications:
+
+1. **Dashboard** — `posture.yourdomain.com/*` — restrict to operator emails
+2. **Admin endpoint** — `vote.yourdomain.com/api/v1/posture/admin` — same group or service token
+
+No auth code in the app. Cloudflare enforces it at the edge.
+
+### 6. Wire the shyconfig
+
+```json
+{
+  "deployment": {
+    "default_posture": "recoverable",
+    "posture_endpoint": "/api/v1/posture",
+    "allow_user_posture_override": true,
+    "runtime_fallbacks": { ... }
+  }
+}
+```
+
+---
+
+## Server-side implementation
+
+The posture endpoints are two routes in your API server. State is one row per deployment in CockroachDB.
+
+```sql
+CREATE TABLE IF NOT EXISTS deployment_posture (
+  deployment_id  TEXT        NOT NULL PRIMARY KEY,
+  posture        TEXT,
+  reason         TEXT,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+```go
+// GET /api/v1/posture — public
+func handleGetPosture(w http.ResponseWriter, r *http.Request) {
+    var row struct {
+        Posture   *string   `json:"posture"`
+        Reason    *string   `json:"reason"`
+        UpdatedAt time.Time `json:"updated_at"`
+    }
+    err := db.QueryRowContext(ctx,
+        `SELECT posture, reason, updated_at
+         FROM deployment_posture WHERE deployment_id = $1`,
+        deploymentID,
+    ).Scan(&row.Posture, &row.Reason, &row.UpdatedAt)
+    if err == sql.ErrNoRows {
+        json.NewEncoder(w).Encode(map[string]any{"posture": nil, "source": "manifest"})
+        return
+    }
+    source := "manifest"
+    if row.Posture != nil { source = "operator" }
+    json.NewEncoder(w).Encode(map[string]any{
+        "posture": row.Posture, "source": source,
+        "reason": row.Reason, "updated_at": row.UpdatedAt,
+    })
+}
+
+// POST /api/v1/posture/admin — Cloudflare Access gated at ingress
+func handleSetPosture(w http.ResponseWriter, r *http.Request) {
+    var body struct {
+        Posture *string `json:"posture"`
+        Reason  string  `json:"reason"`
+    }
+    json.NewDecoder(r.Body).Decode(&body)
+    _, err := db.ExecContext(ctx,
+        `INSERT INTO deployment_posture (deployment_id, posture, reason, updated_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (deployment_id) DO UPDATE
+           SET posture = $2, reason = $3, updated_at = now()`,
+        deploymentID, body.Posture, body.Reason,
+    )
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    w.WriteHeader(http.StatusOK)
+}
+```
+
+The `GET` endpoint is public. The `POST` endpoint is never exposed without Cloudflare Access in front of it.

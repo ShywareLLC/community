@@ -1,0 +1,158 @@
+---
+title: CLI Reference
+description: Command-line tools for running, verifying, and operating shyware deployments
+sidebar_position: 4
+---
+
+All shyware server binaries and operator tools accept `--help` for flag documentation. Flags can be overridden by `SHYWARE_*` environment variables (see [protocol/config](/sdk/protocol-config)).
+
+---
+
+## shyvoting-abci
+
+The voting and governance ABCI application server. Connects to CometBFT via the ABCI socket protocol.
+
+```bash
+shyvoting-abci \
+  --addr        tcp://0.0.0.0:26658 \
+  --chain-id    shyvoting-1 \
+  --db-path     /opt/shyvoting/data \
+  --db-name     shyvoting \
+  --app-name    "My Deployment" \
+  --kms-key-id  arn:aws:kms:us-east-1:123:key/abc \  # AWS KMS key for HSM attestation
+  --zk-vk-path  /opt/shyvoting/nullifier_vk.bin      # optional: ZK tier verifying key
+```
+
+Omit `--kms-key-id` to run with a local software signer (dev only). Omit `--zk-vk-path` to disable the ZK tier.
+
+---
+
+## shyvoting-api
+
+HTTP API server for shyvoting. Proxies CometBFT RPC and manages the off-chain receipt store.
+
+```bash
+shyvoting-api \
+  --cometbft-rpc  http://127.0.0.1:26657 \
+  --port          8080 \
+  --service-name  shyvoting-api \
+  --crdb-url      postgresql://root@crdb:26257/shyvoting \
+  --firebase-creds /opt/shyvoting/firebase.json
+```
+
+`--crdb-url` empty → write-only posture (no off-chain receipt store). `--firebase-creds` empty → no authentication enforced (dev only).
+
+### Lambda variant
+
+```bash
+# Build for Lambda (ARM64)
+GOOS=linux GOARCH=arm64 go build -o bootstrap ./cmd/shyvoting-api-lambda/
+zip bootstrap.zip bootstrap
+aws lambda update-function-code --function-name shyvoting-api --zip-file fileb://bootstrap.zip
+```
+
+`shyvoting-api-lambda` wraps the same HTTP handler with `algnhsa` for AWS Lambda + API Gateway deployments.
+
+---
+
+## shyvoting-relay
+
+Relay server for batch-queue submission dispatch. Queues ballot submissions and flushes them to the canonical API in configurable batches, providing cover traffic timing separation.
+
+```bash
+shyvoting-relay \
+  --upstream  http://127.0.0.1:8080 \
+  --port      8081
+```
+
+Routes: `POST /relay/ballots`, `POST /relay/polls/{id}/flush`, `GET /relay/polls/{id}/count`. The relay server does not hold canonical state — it forwards to the upstream shyvoting-api on flush.
+
+---
+
+## shyvoting-verify
+
+Standalone offline tally verifier. Fetches the tally from any shyvoting API, verifies the HSM signature, and prints a human-readable result. Exit 0 on pass, exit 2 on failure.
+
+```bash
+shyvoting-verify \
+  --api   http://localhost:8080 \
+  --poll  proposal-42 \
+  --name  "My Deployment"
+
+# Output:
+# My Deployment Tally Verifier — poll: proposal-42
+# Total votes: 1247
+# Signature: VALID
+# Confirmed: 1201 / 1247
+```
+
+No credentials required. Any party with network access to the API can verify the tally independently.
+
+---
+
+## zk-setup
+
+One-time Groth16 trusted setup for the shyvoting NullifierCircuit. Produces the proving key (for clients) and verifying key (for validators).
+
+```bash
+go run ./cmd/zk-setup \
+  -pk  nullifier_pk.bin \
+  -vk  nullifier_vk.bin \
+  -name shyvoting
+```
+
+**Warning:** Single-party setup is dev-only. For production, run a Groth16 MPC Phase 2 ceremony over a universal SRS (e.g. Hermez Perpetual Powers of Tau).
+
+After setup:
+1. Copy `nullifier_vk.bin` to `/opt/<deployment>/nullifier_vk.bin` on each validator
+2. Start `shyvoting-abci` with `--zk-vk-path /opt/<deployment>/nullifier_vk.bin`
+3. Embed `nullifier_pk.bin` in iOS/Android/web client builds
+
+---
+
+## zk-prover-wasm
+
+Compiles the Groth16 NullifierCircuit prover to WebAssembly for use in browser and React Native clients.
+
+```bash
+GOOS=js GOARCH=wasm go build -o nullifier_prover.wasm ./cmd/zk-prover-wasm/
+```
+
+The compiled WASM is loaded by `sdk/web/zkpClient.js` via `initZKProver`. This is the browser-side proving path for the ZK tier; the verifying key is held by the ABCI node.
+
+---
+
+## shyvoting-affinities
+
+Ballot affinity analysis service. Indexes anonymized tally data and projects alignment scores across proposals and voter cohorts for the public analytics surface (the operator's public analytics surface).
+
+```bash
+shyvoting-affinities \
+  --config    config/config.yaml \
+  --http-addr :9090
+```
+
+Reads from CockroachDB (the off-chain reconcile store event stream). Does not read canonical ledger state directly. The analytics query API at `--http-addr` exposes aggregate affinity projections — no individual ballot direction is exposed.
+
+---
+
+## house-onboard (shyshares)
+
+Custody consortium onboarding utility. Registers an organization, its members, and initial voting weights in a shyshares deployment.
+
+```bash
+go run ./embodiments/shyshares/cmd/house-onboard \
+  --api         http://localhost:8080 \
+  --org-id      dao-main \
+  --org-name    "Main DAO" \
+  --members     members.json \
+  --auth-token  $OPERATOR_TOKEN
+```
+
+`members.json` format:
+```json
+[
+  { "account_commitment": "<H(wallet)>", "voting_weight": 1500, "roles": ["member"] },
+  { "account_commitment": "<H(wallet)>", "voting_weight": 500,  "roles": ["member", "admin"] }
+]
+```

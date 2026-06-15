@@ -1,0 +1,144 @@
+---
+title: state — voting / governance
+description: Go package for the voting and governance ABCI state machine
+---
+
+```go
+import "github.com/populist/protocol/state"
+```
+
+The `state` package is the canonical two-list apparatus for `shyvoting` and the
+nearest reference for `shyshares`. It is the place where canonical anonymous
+transactions mutate consensus state. Other packages are support infrastructure.
+
+## Invariants
+
+The state machine enforces three invariants on every committed block:
+
+1. `len(voteDirections) == len(voterRegistry) == TotalVotes` — count-match
+2. Voter device signature verifies before any ballot is accepted — oracle prevention
+3. Managed IDV attestation verifies before any ballot — identity binding
+
+Invariant 1 is structural: the two maps are incremented atomically inside `executeBallotCast`.
+Invariants 2 and 3 are cryptographic: `validateBallotCast` verifies `voter_sig`
+and the IDV attestation signature before any state mutation.
+
+**Identity tier routing** — both tiers use a device-held secret; the difference is
+receipt store visibility. If a ZK verifier is loaded, the ZK path is taken:
+`identity_hash = ZKNullifier`; IDV attested only a commitment and cannot compute the
+nullifier; receipt store is unlinkable even under subpoena. If no ZK verifier is loaded
+(preferred non-ZK tier): `identity_hash = SHA-256(voter_pub_key ‖ poll_id)`; IDV attested
+`voter_pub_key` and can compute `identity_hash`; receipt store is linkable under lawful
+process; biometric recovery on any device.
+
+## NewState
+
+```go
+func NewState(ctx context.Context, db dbm.DB, kmsKeyID string, logger log.Logger) (*State, error)
+```
+
+Creates a new state manager, loads persisted state from LevelDB, and optionally
+initialises a managed ECDSA signer.
+
+- If `kmsKeyID` is non-empty, a production signing backend is initialised
+- If `kmsKeyID` is empty, tally signing falls back to a SHA-256 stub (for local development)
+
+**Must call `SetDiditPubKey` before processing ballots.** `SetZKVerifier` is optional:
+if omitted the state machine uses the preferred device-keypair tier. Both are
+fail-safe: a missing provider key causes all ballot transactions to be rejected regardless
+of tier.
+
+## SetZKVerifier / SetDiditPubKey
+
+```go
+func (s *State) SetZKVerifier(v *zkp.Verifier)   // optional — omit for preferred non-ZK tier
+func (s *State) SetDiditPubKey(pub ed25519.PublicKey)  // required in both tiers
+```
+
+Install the Groth16 verifying key (ZK tier only) and IDV Ed25519 public key (both tiers).
+Called once at startup before `FinalizeBlock` is ever invoked. `app.New` handles this
+automatically when using the `app` package.
+
+## ValidateTx / ExecuteTx
+
+```go
+func (s *State) ValidateTx(transaction *tx.Tx) error
+func (s *State) ExecuteTx(transaction *tx.Tx) ([]abcitypes.Event, error)
+```
+
+The runtime lifecycle:
+
+```
+CheckTx (mempool gate)  → ValidateTx  (stateful, no mutation)
+FinalizeBlock           → ExecuteTx   (stateful + state mutation)
+```
+
+`ValidateTx` is safe to call concurrently (read-only). `ExecuteTx` must be called
+sequentially within a block (called by `FinalizeBlock` in order).
+
+## Commit
+
+```go
+func (s *State) Commit() ([]byte, error)
+```
+
+Persists all dirty state to LevelDB in a single atomic `WriteSync` batch, increments the
+block height, and returns the new app hash.
+
+App hash is `SHA-256` over all sorted map entries (polls, vote directions, voter registry,
+tallies, validators, confirms). Sort order is lexicographic by key — deterministic across
+all validators for the same block.
+
+## Query
+
+```go
+func (s *State) Query(path string, data []byte, height int64, prove bool) ([]byte, error)
+```
+
+Supported paths:
+
+| Path | Returns |
+|------|---------|
+| `/poll/{poll_id}` | `types.Poll` JSON |
+| `/tally/{poll_id}` | `types.Tally` JSON |
+| `/vote/{ballot_id}` | `types.VoteRecord` JSON |
+| `/confirms/{poll_id}` | `{"confirmed_count": N}` JSON |
+
+Note: `/confirms/{id}` returns only the aggregate count, not individual identity hashes.
+
+## Embedding in your runtime
+
+**Preferred non-ZK tier (device keypair):**
+
+```go
+st, err := state.NewState(ctx, db, os.Getenv("SIGNING_KEY_ID") // or KMS_KEY_ID, logger)
+if err != nil { log.Fatal(err) }
+
+// ZK verifier omitted → preferred non-ZK tier
+pubKeyBytes, _ := hex.DecodeString(os.Getenv("DIDIT_PUBKEY_HEX"))
+st.SetDiditPubKey(ed25519.PublicKey(pubKeyBytes))
+
+// In CheckTx:
+err = st.ValidateTx(transaction)
+
+// In FinalizeBlock, for each tx:
+events, err := st.ExecuteTx(transaction)
+
+// After FinalizeBlock:
+appHash, err := st.Commit()
+```
+
+**ZK tier (high-assurance):**
+
+```go
+st, err := state.NewState(ctx, db, os.Getenv("SIGNING_KEY_ID") // or KMS_KEY_ID, logger)
+if err != nil { log.Fatal(err) }
+
+verifier, _ := zkp.NewVerifier(vkFile)
+st.SetZKVerifier(verifier)  // triggers ZK identity path
+
+pubKeyBytes, _ := hex.DecodeString(os.Getenv("DIDIT_PUBKEY_HEX"))
+st.SetDiditPubKey(ed25519.PublicKey(pubKeyBytes))
+```
+
+Or use `app.New` which handles all of this for you.

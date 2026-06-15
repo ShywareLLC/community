@@ -1,0 +1,259 @@
+---
+title: iOS
+description: Swift package for all shyware embodiments on iOS and macOS
+---
+
+## Install
+
+```swift
+// Package.swift
+.package(url: "https://github.com/NickCarducci/Shyware-SDK.git", from: "0.1.0")
+```
+
+Or via Xcode: **File → Add Package Dependencies** → paste the URL.
+
+Requires iOS 17+ (iOS 26+ for Liquid Glass). Swift 6.2, strict concurrency enabled.
+
+---
+
+## Initialization
+
+Every client decodes a `ShyConfig` manifest and validates it on initialization. Load from your app bundle:
+
+```swift
+import ShywareSDK
+
+let url    = Bundle.main.url(forResource: "shyconfig", withExtension: "json")!
+let config = try JSONDecoder().decode(ShyConfig.self, from: Data(contentsOf: url))
+```
+
+For attestation-gated deployments, resolve runtime signals before any submission:
+
+```swift
+let attester = AppAttestProvider(
+    storageKey: "com.example.shyware.attest.keyId",
+    registrationURL: URL(string: "https://api.example.com/attest/register")
+)
+let signals = await attester.resolveSignals(network: .init(hostile: false))
+await client.setRuntimeSignals(signals)
+await client.fetchOperatorPosture()
+
+let posture = await client.effectivePosture()
+if posture.writeOnly {
+    // no receipt retained — write-only posture active
+}
+```
+
+See [Attestation](/sdk/ios/attestation) for the full App Attest integration guide.
+
+---
+
+## Count-match embodiments
+
+### VotingClient
+
+```swift
+let client = try VotingClient.from(config)
+
+let result   = try await client.castBallot(pollId: "referendum-2026-1", choice: "yes", input: .didit(personId: diditPersonId))
+let tally    = try await client.getTally("referendum-2026-1")
+let votes    = try await client.getVotes("referendum-2026-1")
+let polls    = try await client.getAllPolls()
+let receipt  = try client.loadReceipt(pollId: "referendum-2026-1")
+let verified = await client.verifyReceipt(nonce: receipt!.ballotNonce, expectedChoice: "yes", votes: votes)
+```
+
+### WireClient
+
+```swift
+let client = try WireClient.from(config)
+
+let account  = try await client.registerAccount(walletAddress: walletAddress)
+let transfer = try await client.wireSubmission(
+    scopingId: assetId, senderCommitment: account.accountCommitment,
+    recipientCommitment: recipientCommitment, amount: 10_00)
+let supply   = try await client.getSupply()
+let history  = try await client.getReconcileHistory()
+let count    = try await client.getCanonicalCount(transferId: transfer.transferId)
+let feed     = try await client.getCanonicalFeed()
+let close    = try await client.periodClose(scopingId: scopingId, l1MerkleRoot: l1, l2MerkleRoot: l2)
+try await client.rescind(transferId: transfer.transferId, eligibilityToken: token)
+```
+
+### CustodyClient
+
+```swift
+let client = try CustodyClient.from(config)
+
+try await client.recordIntakeLot(lotId: lotId, policyId: policyId, assetId: assetId,
+    operatorId: operatorId, warehouseId: warehouseId, accountCommitment: accountCommitment,
+    skuClassId: "XAU-9999", quantity: 100, mintedAmount: 100,
+    videoSessionRef: sessionRef, evidenceRefs: refs)
+try await client.mintSilo(assetId: assetId, accountCommitment: accountCommitment, amount: 100)
+try await client.transferSilo(assetId: assetId, senderCommitment: senderCommitment,
+    recipientCommitment: recipientCommitment, amount: 50)
+let redemption = try await client.requestLotRedemption(assetId: assetId,
+    accountCommitment: accountCommitment, warehouseId: warehouseId,
+    skuClassId: "XAU-9999", siloAmount: 50, requestedQuantity: 50)
+let balance    = try await client.getSiloBalance(assetId: assetId, accountCommitment: accountCommitment)
+let policy     = try await client.getLotPolicy(policyId: policyId)
+```
+
+### ContractsClient
+
+```swift
+let client = try ContractsClient.from(config)
+
+let contract = try await client.registerContract(assetId: assetId,
+    parties: [partyCommitment, counterpartyCommitment], contractType: "rbf", termsRef: termsRef)
+try await client.activateContract(contractId: contract.contractId)
+let execution = try await client.executeContract(contractId: contract.contractId,
+    partyCommitment: partyCommitment, counterpartyCommitment: counterpartyCommitment,
+    sourceRef: sourceRef, amount: 500_00)
+let state = try await client.getContractState(contractId: contract.contractId)
+```
+
+### SharesClient
+
+```swift
+let client = try SharesClient.from(config)
+
+let proposal = try await client.createProposal(
+    proposalClass: "parameter_change", question: "Increase fee to 0.5%?",
+    options: ["yes", "no"], startTime: startTime, endTime: endTime)
+try await client.submitWeightedBallot(proposalId: proposal.proposalId,
+    choice: "yes", accountCommitment: accountCommitment)
+let tally    = try await client.getProposalTally(proposalId: proposal.proposalId)
+let queue    = try await client.getActionQueue()
+let snapshot = try await client.getMembershipSnapshot()
+try await client.dispatchAction(actionId: actionId,
+    adapter: "shywire", adapterPayload: ["amount": 1000, "recipientCommitment": recipientCommitment])
+```
+
+### BetsClient
+
+```swift
+// Single ShyConfig with wire + bets blocks — BetsClient embeds WireClient
+let client = try BetsClient.from(config)
+
+try await client.registerSettlementAccount(walletAddress: walletAddress)
+try await client.createFundingIntent(amount: 500_00, destinationNetwork: "ethereum", destinationAddress: addr)
+let event      = try await client.createEvent(marketId: marketId, title: "Match outcome",
+    outcomes: ["home", "away", "draw"], closesAt: closesAt)
+let order      = try await client.placeOrder(eventId: event.eventId, side: "back",
+    outcome: "home", stake: 500, odds: "2.1", accountCommitment: accountCommitment)
+let settlement = try await client.settleEvent(eventId: event.eventId, winningOutcome: "home")
+let wire       = client.getSettlementClient()   // access internal WireClient
+```
+
+### LotsClient
+
+```swift
+// Single ShyConfig with custody + wire + lots blocks — LotsClient pairs CustodyClient + WireClient
+let client = try LotsClient.from(config)
+
+let account = try await client.registerBidderAccount(walletAddress: walletAddress)
+try await client.transferBidBond(senderCommitment: account.accountCommitment,
+    recipientCommitment: escrowCommitment, amount: 1000)
+try await client.settleAwardTransfer(senderCommitment: escrowCommitment,
+    recipientCommitment: winnerCommitment, amount: 5000)
+try await client.requestLotRedemption(assetId: assetId,
+    accountCommitment: account.accountCommitment, warehouseId: warehouseId,
+    skuClassId: "warehouse_lot", siloAmount: 1, requestedQuantity: 1)
+```
+
+---
+
+## Sealer-governed embodiments
+
+A `SealerKeyProvider` must be supplied — it derives the AES-256-GCM key for payload sealing:
+
+```swift
+struct MyKeyProvider: SealerKeyProvider {
+    func deriveSealerKey(config: ShyConfig, input: IdentityInput) throws -> Data {
+        // derive from operator secret + identity commitment
+    }
+}
+let provider = MyKeyProvider()
+```
+
+### StoreClient
+
+```swift
+let client = try StoreClient.from(config, sealerKeyProvider: provider)
+
+let stored   = try await client.storeSubmission(scopingId: bucketId,
+    plaintext: jsonData, category: "health_record")
+let revealed = try await client.revealAndDecryptStore(scopingId: bucketId,
+    submissionId: stored.submissionId)
+let buckets  = try await client.listBuckets(scopingId: bucketId)
+try await client.deleteStore(scopingId: bucketId, submissionId: stored.submissionId)
+try await client.replaceStore(scopingId: bucketId, submissionId: stored.submissionId,
+    plaintext: updatedData, category: "health_record")
+```
+
+### ChatClient
+
+```swift
+let client = try ChatClient.from(config, sealerKeyProvider: provider)
+
+let mailbox  = try await client.createMailbox(label: "Inbox", address: address, routeHint: nil)
+let dispatch = try await client.queueDispatch(mailboxId: mailbox.mailboxId,
+    recipientAddress: recipientAddress, subject: "Update", body: body, contentClass: "mail_text")
+let inbox    = try await client.getInbox(mailboxId: mailbox.mailboxId)
+try await client.closeDispatch(dispatchId: dispatch.dispatchId)
+```
+
+### RestClient
+
+```swift
+// Single ShyConfig with store + messaging blocks — RestClient pairs StoreClient + ChatClient
+let client = try RestClient.from(config, sealerKeyProvider: provider)
+
+try await client.storeSubmission(scopingId: bucketId, plaintext: data, category: "review_submission")
+try await client.queueDispatch(mailboxId: mailboxId, recipientAddress: addr,
+    subject: "Received", body: body, contentClass: "review_packet")
+
+let store = client.getStoreClient()
+let chat  = client.getChatClient()
+```
+
+### StreamClient
+
+```swift
+// Single ShyConfig with store + stream blocks — StreamClient extends StoreClient
+let client = try StreamClient.from(config, sealerKeyProvider: provider)
+
+let bucket = try await client.createBucket(scopingId: "session-42",
+    allowedCategories: ["stream_event", "stream_clip"])
+try await client.sealLiveSegment(bucketID: "session-42",
+    streamID: streamID, sequence: 0, segment: segmentData)
+
+// Batched queue — flushes when minBatchSize reached or flushIntervalMs elapses
+let queue = try await client.createLiveQueue(bucketID: "session-42",
+    streamID: streamID, minBatchSize: 3, flushIntervalMs: 4000)
+try await queue.enqueue(chunk, sequence: 0)
+```
+
+### BrowserClient
+
+```swift
+let client = try BrowserClient.from(config, sealerKeyProvider: provider)
+
+try await client.storeSealedBrowserData(eventData, category: "browser_session")
+try await client.submitList2IdentityAttribute(ipAddress, attributeType: "ip_address")
+```
+
+---
+
+## Write-only posture
+
+All submission clients check `effectivePosture()` before persisting any receipt. When write-only, the Keychain write is suppressed — the device retains no linkable record after submission.
+
+```swift
+let posture = await client.effectivePosture()
+// posture.writeOnly   → true when coercion_resistant or any fallback triggered
+// posture.recoverable → true when device + network signals both pass
+```
+
+Receipt storage (recoverable posture only) uses `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. Cross-device recovery is available through Didit biometric re-derivation — no seed phrase required. See [Attestation](/sdk/ios/attestation).

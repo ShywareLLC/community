@@ -1,0 +1,142 @@
+---
+title: iOS Attestation
+description: App Attest integration and write-only posture for iOS deployments
+---
+
+## Why attestation matters
+
+The shyconfig declares runtime fallback rules that gate receipt confirmation:
+
+```json
+{
+  "deployment": {
+    "default_posture": "recoverable",
+    "runtime_fallbacks": {
+      "write_only_on_missing_play_integrity": false,
+      "write_only_on_untrusted_device_attestation": true,
+      "write_only_on_hostile_network": false
+    }
+  }
+}
+```
+
+When `write_only_on_untrusted_device_attestation: true` and the device cannot be attested, `resolveEffectivePosture` returns `effectivePosture = "write_only"`. The ballot can be submitted but the receipt nonce is not persisted — the voter has no offline proof of their direction.
+
+In high-assurance anti-surveillance deployments the same shyconfig also sets `write_only_on_hostile_network: true`. On mobile, the calling app can provide a trusted network signal — VPN detection via the OS networking layer, or an IP-based jurisdiction check against the shyconfig `high_risk_region_blocklist` — and set `network.hostile = true` when a hostile environment is detected. **Web cannot provide this signal.** A browser has no trusted mechanism to detect VPN activity or verify that the client IP is not in a sanctioned jurisdiction; any browser-side check is trivially spoofable. Because web can never produce a verified negative on hostile-environment detection, recoverable posture is structurally unavailable on web for high-assurance deployments. iOS App Attest — combined with a trusted network signal from the OS — is the mechanism that authorizes the recoverable path.
+
+---
+
+## App Attest lifecycle
+
+### 1. Create the provider
+
+```swift
+let attester = AppAttestProvider(
+    storageKey: "com.example.shyware.attest.keyId",
+    registrationURL: URL(string: "https://vote.example.com/api/attest/register")
+)
+```
+
+The provider persists its key ID in `UserDefaults` using `storageKey`. If `registrationURL` is set, `attestKey()` performs the App Attest ceremony and POSTs the attestation payload to your backend for verification and registration.
+
+### 2. Resolve runtime signals
+
+```swift
+guard attester.isSupported else {
+    await client.setRuntimeSignals(.untrusted)
+    return
+}
+
+let signals = await attester.resolveSignals(
+    network: .init(hostile: false)
+)
+await client.setRuntimeSignals(signals)
+```
+
+`resolveSignals` calls `attestKey()` internally. On success it returns `deviceAttestation.trusted = true`. On unsupported devices or attestation failure it returns `.untrusted`.
+
+### 3. Fetch posture override (optional)
+
+If your deployment config includes `deployment.posture_endpoint`, fetch it after setting runtime signals:
+
+```swift
+await client.fetchOperatorPosture()
+```
+
+### 4. Assert per request
+
+After initial attestation, you can bind individual requests to the attested key:
+
+```swift
+let requestData = Data(txJson.utf8)
+let assertion = try await attester.assert(requestData: requestData)
+// Include assertion in your request headers for server-side per-request binding
+```
+
+Or wrap it as the client's assertion provider:
+
+```swift
+let client = try VotingClient.from(
+    config,
+    assertionProvider: attester.assertionProvider()
+)
+```
+
+---
+
+## Posture resolution
+
+After setting signals, check posture before showing the ballot UI:
+
+```swift
+let posture = await client.effectivePosture()
+
+switch posture.effectivePosture {
+case "recoverable":
+    // Full receipt flow: ballot + nonce persisted to Keychain
+    showFullBallotUI()
+case "write_only":
+    // Reasons tell you why
+    if posture.fallbackReasons.contains("untrusted_device_attestation") {
+        showWriteOnlyUI(reason: "Device attestation unavailable on this device.")
+    }
+default:
+    break
+}
+```
+
+The `fallbackReasons` array mirrors the web SDK exactly:
+- `"missing_play_integrity"` — Play Integrity not available or failed (Android-only; mapped on iOS to device attestation)
+- `"untrusted_device_attestation"` — App Attest failed or not supported
+- `"hostile_network"` — network signal flagged hostile
+- `"hsm_unavailable"` — the runtime signaled HSM unavailability
+- `"user_preference"` — local user posture override forced write-only
+- `"operator_override"` — server-pushed posture forced write-only
+
+---
+
+## Simulator behavior
+
+`DCAppAttestService.shared.isSupported` returns `false` on simulators. `AppAttestProvider.attest` returns `.untrusted` without making any API calls. For development:
+
+```swift
+#if targetEnvironment(simulator)
+await client.setRuntimeSignals(.trusted)   // dev override
+#else
+let signals = await attester.resolveSignals(network: .init(hostile: false))
+await client.setRuntimeSignals(signals)
+#endif
+```
+
+Do not ship the `.trusted` override to production.
+
+---
+
+## Receipt storage
+
+When posture is `recoverable`, `castBallot` persists a `BallotReceipt` to the iOS Keychain under `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`. The receipt survives:
+
+- App updates
+- Reinstallation on the same device (if iCloud Keychain sync is enabled)
+
+The receipt is device-bound by default. For cross-device recovery, the voter re-authenticates with the IDV provider (Didit biometric), which re-derives the commitment and allows re-verification against the public vote list — no seed phrase required.

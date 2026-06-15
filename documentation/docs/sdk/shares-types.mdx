@@ -1,0 +1,113 @@
+---
+title: types — shyshares
+description: Go types for shyshares-v1 weighted governance
+---
+
+Package `shyshares` defines the domain types for `shyshares-v1`.
+
+Import path: `github.com/NickCarducci/Shyware-SDK/shyshares`
+
+## Organization
+
+```go
+type Organization struct {
+    ID          string `json:"id"`
+    Name        string `json:"name"`
+    Description string `json:"description,omitempty"`
+    CreatedAt   int64  `json:"created_at"`
+}
+```
+
+The top-level governance entity. Members belong to an organization; proposals are scoped to an organization.
+
+## MembershipSnapshot
+
+```go
+type MembershipSnapshot struct {
+    AccountCommitment string   `json:"account_commitment"`
+    OrganizationID    string   `json:"organization_id"`
+    Roles             []string `json:"roles"`
+    VotingWeight      uint64   `json:"voting_weight"`
+    EffectiveAt       int64    `json:"effective_at"`
+}
+
+func (m MembershipSnapshot) EffectiveVotingWeight() uint64
+func (m MembershipSnapshot) HasRole(role string) bool
+```
+
+`AccountCommitment` is the anonymous member commitment — `H(wallet_address)`. `VotingWeight` is the token-weighted voting power at snapshot time. `EffectiveVotingWeight()` returns 0 if the snapshot is expired.
+
+## GovernanceProposal
+
+```go
+type GovernanceProposal struct {
+    ID             string   `json:"id"`
+    OrganizationID string   `json:"organization_id"`
+    Title          string   `json:"title"`
+    Options        []string `json:"options"`
+    VotingMethod   string   `json:"voting_method"` // "weighted" | "equal"
+    StartTime      int64    `json:"start_time"`
+    EndTime        int64    `json:"end_time"`
+    Status         string   `json:"status"` // "open" | "closed"
+    ActionType     string   `json:"action_type,omitempty"`
+    ActionPayload  any      `json:"action_payload,omitempty"`
+}
+```
+
+`ActionType` and `ActionPayload` are set when the proposal, if passed, triggers a canonical action (e.g. transferring treasury funds or updating a registry entry). These are dispatched via `QueuedGovernanceAction` after the proposal closes.
+
+## WeightedBallot
+
+```go
+type WeightedBallot struct {
+    ProposalID        string `json:"proposal_id"`
+    Choice            string `json:"choice"`
+    Weight            uint64 `json:"weight"`
+    SubmissionNonce       string `json:"submission_nonce"`
+    AccountCommitment string `json:"account_commitment"`
+}
+```
+
+Wrapped in a `tx.Envelope` with `Protocol: "shyvoting"` for submission. The two-list write uses the voting sub-machine: `ballotID = H(ballot_nonce)` on List 1, `H(account_commitment ‖ proposal_id)` on List 2.
+
+## GovernanceTally
+
+```go
+type GovernanceTally struct {
+    ProposalID    string            `json:"proposal_id"`
+    Options       []string          `json:"options"`
+    Counts        map[string]uint64 `json:"counts"`         // option → vote count
+    Weights       map[string]uint64 `json:"weights"`        // option → total weight
+    TotalMembers  int64             `json:"total_members"`
+    TotalWeight   uint64            `json:"total_weight"`
+    MerkleRoot1   string            `json:"merkle_root_1"`  // List 1 root (ballot IDs)
+    MerkleRoot2   string            `json:"merkle_root_2"`  // List 2 root (identity hashes)
+    PublicKey     string            `json:"public_key"`     // HSM public key (DER)
+    Signature     string            `json:"signature"`      // HSM signature over roots + counts
+}
+```
+
+HSM-signed at proposal close. Any party can verify using only `PublicKey` and `Signature`.
+
+## QueuedGovernanceAction
+
+```go
+type QueuedGovernanceAction struct {
+    ID         string             `json:"id"`
+    ProposalID string             `json:"proposal_id"`
+    ActionType string             `json:"action_type"`
+    Payload    any                `json:"payload"`
+    Status     string             `json:"status"` // "queued" | "dispatched" | "failed"
+    CreatedAt  int64              `json:"created_at"`
+    DispatchedAt *int64           `json:"dispatched_at,omitempty"`
+    DispatchedBy string           `json:"dispatched_by,omitempty"`
+}
+
+const (
+    ActionStatusQueued     = "queued"
+    ActionStatusDispatched = "dispatched"
+    ActionStatusFailed     = "failed"
+)
+```
+
+Created by `NewQueuedAction` when a proposal closes with a passing tally. Dispatched on-chain via `BuildActionDispatch` + the `/actions/{id}/dispatch` API endpoint.

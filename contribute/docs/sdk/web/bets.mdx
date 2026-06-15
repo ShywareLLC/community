@@ -1,0 +1,68 @@
+---
+title: betsClient
+description: Anonymous event betting and order placement for shybets-v1 deployments
+---
+
+> Initialize with [`initializeFromShyConfig`](/sdk/web/overview#pattern) — see the [Web SDK overview](/sdk/web/overview) for the common setup pattern.
+
+## Discover events
+
+```js
+const events = await client.listEvents({ status: "open", marketId: "election-2026" });
+const event  = await client.getEvent("event-001");
+const book   = await client.listOrderBook("event-001");
+```
+
+## Place an order
+
+```js
+const envelope = await client.buildPlaceOrderTx({
+  eventId:           "event-001",
+  side:              "back",
+  outcome:           "candidate-a",
+  stake:             500,
+  odds:              2.1,
+  accountCommitment: myCommitment,
+  settlementAssetId: "usd-bets"
+});
+
+await client.submitPlaceOrderTx(envelope.txJson);
+// or combined:
+await client.placeOrder({ eventId: "event-001", side: "back", outcome: "candidate-a", stake: 500, odds: 2.1, accountCommitment: myCommitment });
+```
+
+`orderId` is derived as `SHA-256(eventId + accountCommitment + orderNonce)` — a direction-free identifier. The account commitment and the order are on separate canonical lists with no join key.
+
+## Create an event (operator)
+
+```js
+await client.createEvent({
+  marketId:  "election-2026",
+  title:     "General Election — District 7",
+  outcomes:  ["candidate-a", "candidate-b", "spoiled"],
+  closesAt:  "2026-11-03T23:59:59Z"
+});
+```
+
+## Settlement
+
+```js
+const settlements = await client.listSettlements({ eventId: "event-001" });
+const settlement  = await client.getSettlement("event-001");
+```
+
+Settlement finalization is operator-triggered after the event resolves. Winning orders are matched against the settlement record via the reconciling authority — individual order attribution is not available from canonical state alone.
+
+## Settlement wire surface
+
+The bets client delegates the account registration and fund-flow surface to `wireClient` internally. Access it via:
+
+```js
+const wire = client.getSettlementClient();
+await wire.registerAccount({ walletAddress: "0xabc..." });
+await wire.getBalance("usd-bets", accountCommitment);
+```
+
+## Structural guarantee
+
+Order placement writes the account commitment to List 2 and the direction-free order ID to List 1. An operator cannot determine which account placed which order from canonical state alone. Settlement attribution requires the reconciling authority's off-chain linkage store, accessible only under lawful process.

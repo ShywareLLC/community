@@ -1,0 +1,111 @@
+---
+title: contracts
+description: HTTP API for shycontracts-v1 anonymous smart contracts
+---
+
+The shycontracts API is served by the shywire API server alongside wire transfer and custody routes. Contract executions that move value use the shywire transfer rail.
+
+## Base URL
+
+Configured via `shyconfig.api.base_url`.
+
+## Endpoint summary
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/contracts` | Register a contract |
+| `POST` | `/contracts/activate` | Activate a pending contract |
+| `GET` | `/contracts/{contract_id}` | Get a contract record |
+| `POST` | `/contracts/executions` | Submit a contract execution event |
+| `GET` | `/contracts/executions/{execution_id}` | Get an execution record |
+
+Wire transfer endpoints (`/transfers`, `/accounts`, `/supply`) are also available on the same server for stake position movement between financing participants.
+
+---
+
+## POST /contracts
+
+Registers an anonymous contract on-chain. Use `contractsClient.buildRegisterContract` to construct the envelope — `contract_id` and `contract_hash` are derived client-side. Starts `active` by default; pass `pending_condition: true` to require an activation step before executions are accepted.
+
+```json
+{
+  "contract_id":       "<H(contractHash:timestamp:nonce)>",
+  "asset_id":          "usd-contracts",
+  "contract_type":     "escrow",
+  "contract_hash":     "<H(contractType + offchainTerms + parties + metadata)>",
+  "parties": [
+    { "role": "buyer",  "commitment": "<H(wallet_address)>", "seniority": 0 },
+    { "role": "seller", "commitment": "<H(wallet_address)>", "seniority": 1 }
+  ],
+  "metadata":          { "terms_url": "ipfs://Qm..." },
+  "pending_condition": true,
+  "expiry_timestamp":  0,
+  "timestamp":         1741651200
+}
+```
+
+`contract_hash` binds the record to off-chain terms without revealing them. Party commitments are `H(wallet_address)` — not derivable from canonical state alone. `metadata` is written to canonical state as-is; `offchainTerms` (client-side only) is hashed into `contract_hash` and not stored.
+
+Response: `{ "contract_id": "...", "status": "pending_condition" | "active" }`
+
+## POST /contracts/activate
+
+Transitions a `pending_condition` contract to `active`. Only valid when the contract was registered with `pending_condition: true`. Use `contractsClient.buildActivateContract`.
+
+```json
+{
+  "contract_id":  "<contract_id>",
+  "evidence_hash": "<H(evidence string)>",
+  "evidence_type": "delivery_confirmation",
+  "activated_at":  1741651200
+}
+```
+
+## GET /contracts/`{contract_id}`
+
+Returns the contract record.
+
+```json
+{
+  "contract_id":     "...",
+  "contract_type":   "escrow",
+  "status":          "active",
+  "execution_count": 3,
+  "total_executed":  150000
+}
+```
+
+Party commitments are in the record but require the reconciling authority's off-chain linkage store to map to identities.
+
+## POST /contracts/executions
+
+Records a contract execution event on-chain. Value-bearing executions move balance from `party_commitment` to `counterparty_commitment`. Use `contractsClient.buildContractExecution`.
+
+```json
+{
+  "contract_id":              "<contract_id>",
+  "asset_id":                 "usd-contracts",
+  "party_commitment":         "<H(wallet_address)>",
+  "counterparty_commitment":  "<H(wallet_address)>",
+  "execution_type":           "payment",
+  "source_ref":               "<invoice-id or idempotency key>",
+  "amount":                   50000,
+  "payload":                  { "milestone": "delivery" },
+  "nullifier":                "<H(partyCommitment:contractId:sourceRef)>",
+  "transfer_nonce":           "<32-byte hex>",
+  "timestamp":                1741651200
+}
+```
+
+`nullifier = H(partyCommitment:contractId:sourceRef)` is deterministic on `source_ref` — same `source_ref` twice is rejected as a duplicate. `execution_id = H(transfer_nonce)` is the receipt.
+
+## GET /contracts/executions/`{execution_id}`
+
+```json
+{
+  "transfer_id": "...",
+  "contract_id": "...",
+  "amount":      2000,
+  "committed_at": 1780000000
+}
+```

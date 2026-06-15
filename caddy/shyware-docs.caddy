@@ -1,0 +1,19 @@
+shyware.fyi {
+  root * /var/www/shyware-splash
+  try_files {path} /index.html
+  file_server
+}
+
+docs.shyware.fyi {
+  redir / /introduction/ 302
+  root * /var/www/docs-shyware
+  try_files {path} {path}/ /index.html
+  file_server
+}
+
+contribute.shyware.fyi {
+  redir / /introduction/ 302
+  root * /var/www/contribute-shyware
+  try_files {path} {path}/ /index.html
+  file_server
+}

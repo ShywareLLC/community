@@ -1,0 +1,822 @@
+{
+  "stack": "4",
+  "run": "local",
+  "githubRunId": null,
+  "timestamp": "2026-05-25T21:27:53.233Z",
+  "auth": "none — derivation-layer, no network",
+  "ledger": "none — derivation-layer, no network",
+  "sections": [
+    {
+      "name": "WRITE-KERNEL",
+      "assertions": [
+        {
+          "label": "L1 submissionId and L2 identityHash share no value — rejection predicate satisfied",
+          "claim": "Claim 1",
+          "result": "pass",
+          "ms": 126
+        },
+        {
+          "label": "L1 record carries no uid input — rejection predicate is write-architecture, not policy",
+          "claim": "Claim 1",
+          "result": "pass",
+          "ms": 3
+        },
+        {
+          "label": "L2 record carries no blockHash or nonce — rejection predicate enforced on both lists",
+          "claim": "Claim 1",
+          "result": "pass",
+          "ms": 4
+        },
+        {
+          "label": "two-party threshold: single-authority rescission is structurally incomplete",
+          "claim": "Claim 10",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "participant-initiated withdrawal atomically removes both L1 and L2 records",
+          "claim": "Claim 15",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "swap-only replacement: L1 record is atomically replaced, L2 is unchanged — count-match preserved",
+          "claim": "Claim 16",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "action-category enumeration is closed — only disable/freeze/rescind/restore are valid",
+          "claim": "Claim 11",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "adverse-action rate limit: two rescissions on the same identity in the same period are structurally distinguishable",
+          "claim": "Claim 12",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "authority restoration: a previously revoked authority can be reinstated, producing a canonical restore event",
+          "claim": "Claim 13",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "referenced-action restoration: restore references the specific prior action ID it reverses",
+          "claim": "Claim 14",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "re-attestation audit record: re-attestation produces an append-only canonical log entry",
+          "claim": "Claim 7",
+          "result": "pass",
+          "ms": 1
+        }
+      ]
+    },
+    {
+      "name": "BEACON",
+      "assertions": [
+        {
+          "label": "submissionId is deterministic for same (blockHash, nonce)",
+          "claim": "Claim 8",
+          "result": "pass",
+          "ms": 6
+        },
+        {
+          "label": "different blockHashes produce different submissionIds — pre-computation impossible",
+          "claim": "Claim 8",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "different nonces produce different submissionIds — no reuse",
+          "claim": "Claim 8",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "submissionId contains no identity material — passes field-exclusivity test",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 3
+        },
+        {
+          "label": "beacon sliding window: stale block hash produces structurally different submissionId from fresh one",
+          "claim": "Claim 54",
+          "result": "pass",
+          "ms": 10
+        },
+        {
+          "label": "nonce-plus-payload committing identifier: payload hash is embedded in the identifier input",
+          "claim": "Claim 55",
+          "result": "pass",
+          "ms": 3
+        }
+      ]
+    },
+    {
+      "name": "WRITE-ONLY",
+      "assertions": [
+        {
+          "label": "coercion_resistant defaultPosture → effectivePosture.writeOnly == true",
+          "claim": "Claim 9",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "recoverable defaultPosture + trusted signals → effectivePosture.recoverable == true",
+          "claim": "Claim 9",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "hostile_network signal + write_only_on_hostile_network:true → write-only, fallback reason recorded",
+          "claim": "Claim 9",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "web session approval gate: TTL-expired token produces structurally distinct state from valid token",
+          "claim": "Claim 45",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    },
+    {
+      "name": "ORACLE-RESISTANCE",
+      "assertions": [
+        {
+          "label": "identityHash = H(H(personId),scopeId) ≠ H(personId,scopeId) — IDV cannot derive on-chain hash",
+          "claim": "Claim 2",
+          "result": "pass",
+          "ms": 13
+        },
+        {
+          "label": "same personId, different scopings → different on-chain hashes — IDV cannot cross-correlate",
+          "claim": "Claim 2",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "browser write-only: BrowserClient struct carries no receipt-store field",
+          "claim": "Claim 3",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "IDV cast-count audit: each submission increments IDV counter independently of L1 record",
+          "claim": "Claim 4",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "IDV signed attestation log: each IDV attestation carries a scoping-id-scoped signature",
+          "claim": "Claim 5",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "recurring re-attestation sub-chain: each re-attestation references prior chain head",
+          "claim": "Claim 6",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "oracle-resistant sk_v binding: sk_v keypair generated on device; IDV never receives sk_v",
+          "claim": "Claim 51",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "canonical key-destruction attestation: sk_v destruction is a typed canonical event",
+          "claim": "Claim 52",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    },
+    {
+      "name": "NON-DERIVABILITY",
+      "assertions": [
+        {
+          "label": "P(id1 == id2 for two independent inputs) is negligible — formal non-derivability bound",
+          "claim": "Claim 17",
+          "result": "pass",
+          "ms": 4
+        },
+        {
+          "label": "SHA-256 output space is 2^256 — collision-resistance satisfies formal bound",
+          "claim": "Claim 17",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "timing-correlation bound: batch-flush ABCI sort removes per-record ordering metadata",
+          "claim": "Claim 17",
+          "result": "pass",
+          "ms": 2
+        }
+      ]
+    },
+    {
+      "name": "COUNT-MATCH",
+      "assertions": [
+        {
+          "label": "|L1| = |L2| after N submissions — count-match universality",
+          "claim": "Claim 18",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "non-atomic write cannot satisfy count-match — rejection predicate enforced",
+          "claim": "Claim 18",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "validation-layer uniqueness: same (scopingId, identityHash) pair cannot appear twice in L2",
+          "claim": "Claim 19",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "ZK non-membership proof: nullifier F(sk,scopeId) ≠ H(uid,scopeId) — ZK mode structurally distinct",
+          "claim": "Claim 20",
+          "result": "pass",
+          "ms": 5
+        }
+      ]
+    },
+    {
+      "name": "EXCLUSION",
+      "assertions": [
+        {
+          "label": "mapping-op exclusion: no system operation produces a (submissionId → identityHash) accumulator",
+          "claim": "Claim 21",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "intermediate-state non-materialization: batchCandidate struct is transient and never validator-addressable",
+          "claim": "Claim 22",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "batch-flush ordering: N submissions produce N independent submissionIds with no insertion-order correlation",
+          "claim": "Claim 23",
+          "result": "pass",
+          "ms": 2
+        },
+        {
+          "label": "independent derivation + temporal exclusion: submissionId shares no input with identityHash",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "passing uid as blockHash input does not reproduce identityHash — paths are disjoint",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "passing blockHash as uid input does not reproduce submissionId — paths are disjoint",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "cross-scoping unlinkability: same uid, different scopingIds → different identityHashes",
+          "claim": "Claim 25",
+          "result": "pass",
+          "ms": 3
+        },
+        {
+          "label": "cross-scoping: different uids, same scopingId → different identityHashes",
+          "claim": "Claim 25",
+          "result": "pass",
+          "ms": 1
+        }
+      ]
+    },
+    {
+      "name": "SEALING",
+      "assertions": [
+        {
+          "label": "sealed L2 attribute: sealing key is not present in the canonical L2 record",
+          "claim": "Claim 26",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "payload sealing: sealed L1 payload does not reveal direction — sealing key excluded from L1 record",
+          "claim": "Claim 27",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    },
+    {
+      "name": "STORE-WRITE",
+      "assertions": [
+        {
+          "label": "store write-kernel: two-list invariant holds in store-backed anonymous submission",
+          "claim": "Claim 28",
+          "result": "pass",
+          "ms": 2
+        },
+        {
+          "label": "store write-only: receipt suppressed after write in write-only posture",
+          "claim": "Claim 29",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "store payload sealer: sealing key structurally excluded from canonical state",
+          "claim": "Claim 30",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "store L2 attribute sealing: both L1 payload and L2 identity attribute are sealed",
+          "claim": "Claim 31",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "credential-free rescission: biometric re-derivation enables rescission without memorized secrets",
+          "claim": "Claim 32",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "suppress/restore reveal path: suppressed reveal cannot be accessed until explicitly restored",
+          "claim": "Claim 33",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    },
+    {
+      "name": "WIRE-WRITE",
+      "assertions": [
+        {
+          "label": "wire write-kernel: two-list invariant holds for private value-transfer state machine",
+          "claim": "Claim 34",
+          "result": "pass",
+          "ms": 3
+        },
+        {
+          "label": "wire write-only: after transfer write, device retains no receipt linking sender/recipient to amount",
+          "claim": "Claim 35",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "wire L2 attribute sealing: recipient identity attribute sealed before L2 commit",
+          "claim": "Claim 37",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "account-control + enrollment gate: transfer only accepted from enrolled accounts",
+          "claim": "Claim 36",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "conservation audit surface: total supply conservation is publicly verifiable",
+          "claim": "Claim 38",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "wire two-party adverse action: freeze requires co-signature from two authorities",
+          "claim": "Claim 39",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "goal-gated financing: activation only triggers when cumulative remittance meets threshold",
+          "claim": "Claim 40",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "remittance nullifier uniqueness: each remittance ID is unique and non-reusable",
+          "claim": "Claim 41",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "per-contract parity attestation: each contract period produces a signed parity attestation",
+          "claim": "Claim 42",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    },
+    {
+      "name": "VOTE-WRITE",
+      "assertions": [
+        {
+          "label": "vote write-kernel: two-list invariant holds for eligible-participant anonymous-submission state machine",
+          "claim": "Claim 43",
+          "result": "pass",
+          "ms": 5
+        },
+        {
+          "label": "vote write-only: after ballot submission, device retains only direction-free ballot_id",
+          "claim": "Claim 44",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "partition migration (hostile-regime): migration increments SealedCount; device state is indistinguishable from write-only",
+          "claim": "Claim 46",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "write-only + partition migration: combined Claim 46 — SealedCount increment is sole canonical migration signal",
+          "claim": "Claim 47",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "sealed-partition cardinality counter: SealedCount is increment-only; global invariant preserved",
+          "claim": "Claim 48",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "four anomaly signals: missing-eligibility, duplicate-identity, count-mismatch, stale-beacon are structurally distinguishable",
+          "claim": "Claim 49",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "appeal + eligibility restoration: appeal produces typed event; eligibility restored after co-auth",
+          "claim": "Claim 50",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "domain-separator isolation: identity commitment for default tier uses distinct namespace prefix",
+          "claim": "Claim 53",
+          "result": "pass",
+          "ms": 4
+        }
+      ]
+    },
+    {
+      "name": "DERIVATION",
+      "assertions": [
+        {
+          "label": "identityHash is deterministic for same (uid, scopingId)",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 3
+        },
+        {
+          "label": "submissionId ≠ identityHash — no collision between L1 and L2 outputs",
+          "claim": "Claim 17",
+          "result": "pass",
+          "ms": 4
+        },
+        {
+          "label": "passing uid as blockHash input does not reproduce identityHash — paths are disjoint",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "passing blockHash as uid input does not reproduce submissionId — paths are disjoint",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 1
+        }
+      ]
+    },
+    {
+      "name": "RECONCILE-KERNEL",
+      "assertions": [
+        {
+          "label": "reconcile kernel: join key cannot be reconstructed through the reconcile interface",
+          "claim": "Claim 56",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "boolean-only presence surface: reconcile returns only true/false, not enumerable records",
+          "claim": "Claim 57",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "stateless invocations: reconcile does not accumulate cross-invocation state",
+          "claim": "Claim 58",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "fresh-input non-enumerability: reconcile requires fresh identity-derived input each invocation",
+          "claim": "Claim 59",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "authority-action audit surface: authority actions are logged to an append-only canonical surface",
+          "claim": "Claim 60",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "period-close attestation: HSM signs period-close over dual disjoint Merkle roots",
+          "claim": "Claim 61",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "rolling checkpoints: each checkpoint references prior checkpoint hash — append-only chain",
+          "claim": "Claim 62",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    },
+    {
+      "name": "STORE-RECONCILE",
+      "assertions": [
+        {
+          "label": "store reconcile-kernel: join key cannot be reconstructed through store reconcile interface",
+          "claim": "Claim 63",
+          "result": "pass",
+          "ms": 3
+        },
+        {
+          "label": "reveal event record: reveal produces a typed canonical event with append-only commitment",
+          "claim": "Claim 64",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "non-bulk extraction gating: reconcile interface cannot return bulk record set",
+          "claim": "Claim 65",
+          "result": "pass",
+          "ms": 1
+        }
+      ]
+    },
+    {
+      "name": "WIRE-RECONCILE",
+      "assertions": [
+        {
+          "label": "wire reconcile-kernel: wire reconcile cannot link transfer record to sender/recipient identity",
+          "claim": "Claim 66",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "conservation-aware forced redemption: redemption only proceeds when supply conservation is verified",
+          "claim": "Claim 67",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "freeze co-signature scoping: freeze scope is bound to a specific scoping identifier — no global freeze",
+          "claim": "Claim 68",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    },
+    {
+      "name": "VOTE-RECONCILE",
+      "assertions": [
+        {
+          "label": "vote reconcile-kernel: biometric IDV mandatory; ballot inclusion verifiable without disclosing direction",
+          "claim": "Claim 69",
+          "result": "pass",
+          "ms": 2
+        },
+        {
+          "label": "re-attestation status readback: participant receives matched/included status only — no direction revealed",
+          "claim": "Claim 70",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "rescission-evidence retrieval: participant receives direction-free rescission evidence only",
+          "claim": "Claim 71",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "reveal-evidence: requester receives direction-free ballot_id only; dual co-auth required; public canonical event",
+          "claim": "Claim 72",
+          "result": "pass",
+          "ms": 3
+        }
+      ]
+    },
+    {
+      "name": "SYSTEM-APPARATUS",
+      "assertions": [
+        {
+          "label": "combined write + reconcile apparatus: write-side and reconcile-side are co-equal, structurally partitioned",
+          "claim": "Claim 73",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "two-party threshold authority rescission (system): system-level co-auth enforces rescission gate",
+          "claim": "Claim 74",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "multi-layer compositional cross-scoping: identity in scope A is unlinkable to identity in scope B at system level",
+          "claim": "Claim 75",
+          "result": "pass",
+          "ms": 2
+        },
+        {
+          "label": "optional payload field under posture control: payload field absent in write-only mode",
+          "claim": "Claim 76",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "posture-transition recorder: posture change produces canonical transition event",
+          "claim": "Claim 77",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "invocation non-repudiation log: reconcile invocations are logged with caller identity",
+          "claim": "Claim 78",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "commit authority partition: reconcile authority holds no commit key — partition enforced",
+          "claim": "Claim 79",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "HSM period-close attestation + dual Merkle: L1 root and L2 root are structurally disjoint",
+          "claim": "Claim 80",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "homomorphic per-option commitments: per-option tallies are publicly verifiable without revealing individual choices",
+          "claim": "Claim 81",
+          "result": "pass",
+          "ms": 1
+        }
+      ]
+    },
+    {
+      "name": "CRM",
+      "assertions": [
+        {
+          "label": "CRM dual-mode deployment: write-kernel mode and reconcile-kernel mode are structurally distinct config states",
+          "claim": "Claim 82",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "k-of-n threshold enrollment: enrollment requires k-of-n credential factors before identity commitment is written",
+          "claim": "Claim 83",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "semi-write-only posture: CRM exposes direction-free receipt but not payload direction",
+          "claim": "Claim 84",
+          "result": "pass",
+          "ms": 7
+        },
+        {
+          "label": "VDF-hardened identifier: VDF output structurally distinct from plain SHA-256 beacon identifier",
+          "claim": "Claim 85",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    },
+    {
+      "name": "DIRECTION-FREE",
+      "assertions": [
+        {
+          "label": "submissionId = H(blockHash,nonce) — direction is not an input",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 2
+        },
+        {
+          "label": "H(blockHash,'yes:'+nonce) ≠ H(blockHash,nonce) — direction-prefixed nonce not canonical",
+          "claim": "Claim 17",
+          "result": "pass",
+          "ms": 1
+        }
+      ]
+    },
+    {
+      "name": "CROSS-SCOPING",
+      "assertions": [
+        {
+          "label": "same uid, different scopingIds → different identityHashes",
+          "claim": "Claim 25",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "different uids, same scopingId → different identityHashes",
+          "claim": "Claim 25",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "H(uid || scopingId_A) ≠ H(uid) — scopingId is structurally required",
+          "claim": "Claim 25",
+          "result": "pass",
+          "ms": 1
+        }
+      ]
+    },
+    {
+      "name": "CROSS-PLATFORM",
+      "assertions": [
+        {
+          "label": "submissionId derivation matches known SHA-256 answer — platform-neutral",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "identityHash derivation matches known SHA-256 answer — platform-neutral",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 1
+        },
+        {
+          "label": "identity commitment = SHA-256(namespace:provider:source) — 64-char hex, platform-neutral",
+          "claim": "Claim 24",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    },
+    {
+      "name": "COVER-TRAFFIC",
+      "assertions": [
+        {
+          "label": "real submission increments pendingRealCount — dummy slot will be absorbed",
+          "claim": "Claim 9",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "timer tick absorbs pending real slot — dummy not fired",
+          "claim": "Claim 9",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "timer tick with no pending real — dummy fires normally",
+          "claim": "Claim 9",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "N real submissions absorbed over N timer ticks — aggregate rate constant",
+          "claim": "Claim 9",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "dummy request is structurally indistinguishable in format from real request",
+          "claim": "Claim 9",
+          "result": "pass",
+          "ms": 0
+        },
+        {
+          "label": "dummy write never reaches canonical state — count-match invariant preserved",
+          "claim": "Claim 9",
+          "result": "pass",
+          "ms": 0
+        }
+      ]
+    }
+  ]
+}

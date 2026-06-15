@@ -1,0 +1,154 @@
+---
+title: Web SDK overview
+description: JavaScript client modules for shyware domains and composable client profiles
+---
+
+## Installation
+
+```bash
+npm install github:NickCarducci/Shyware-SDK
+```
+
+Or pin a specific commit:
+
+```bash
+npm install github:NickCarducci/Shyware-SDK#<commit-sha>
+```
+
+In `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@co-mission/shyware-sdk": "github:NickCarducci/Shyware-SDK"
+  }
+}
+```
+
+The web SDK is ESM-only. Each embodiment has its own client module; there is no monolithic entry point.
+
+---
+
+## Pattern
+
+Every client follows the same three-step pattern:
+
+### 1. Validate and initialize from a shyconfig
+
+```js
+import { initializeFromShyConfig } from "@co-mission/shyware-sdk/clients/embodiments/votingClient.js";
+
+const client = await initializeFromShyConfig(shyconfig, {
+  // optional overrides
+  receiptStore: customStore, // custom receipt backend
+  apiBaseUrl: "https://api.yourdomain.com"
+});
+```
+
+`initializeFromShyConfig` calls `assertXManifest` internally. It throws a descriptive error if the manifest is missing required fields, specifies an unsupported contract version, or declares an incompatible identity mode. Initialization is idempotent.
+
+### 2. Build a transaction envelope
+
+```js
+const envelope = await client.buildVote({
+  scopingId: "proposal-42",
+  payload:   "yes",
+  personId:  "didit-journey-id"
+});
+// → { txJson, submissionId, submissionNonce }
+```
+
+Build methods return a transaction envelope — a JSON-serialized transaction payload plus `submissionId` and `submissionNonce`. The envelope is not yet submitted.
+
+### 3. Submit
+
+```js
+await client.submitVote(envelope.txJson)
+// or combined:
+await client.voteSubmission({ scopingId, payload, personId })
+```
+
+Submit methods POST the `txJson` to the configured API endpoint. `voteSubmission` combines build + submit in one call.
+
+---
+
+## Shared concepts
+
+### Identity commitment
+
+Every client delegates identity commitment construction to `identityClient.createIdentityCommitment`. The resulting commitment is a deterministic hash:
+
+```
+H(namespace : provider : source [:scope])
+```
+
+Where `source` is the provider-specific identifier (`personId` for Didit, `walletAddress` for wallet, `subjectId` for Identus).
+
+### Identity proof hash
+
+A separate `proofHash` binds the commitment to a specific verification workflow:
+
+```
+H("proof" : provider : source : workflowId : issuerDid : scope : audience : nonce)
+```
+
+Both values are constructed client-side from the `identity` block of the shyconfig and the caller's input — no network call required.
+
+### Uniform protocol primitives
+
+Every client that writes to the ledger uses the same parameter and field names, regardless of domain. This applies equally to voting, store, chat, wire, custody, contracts, shares, and all other embodiments. Generic middleware — logging, receipt reconciliation, audit pipelines — operates across all embodiments without branching on domain.
+
+**`submissionId`** — direction-free ledger identifier derived as `SHA-256(submissionNonce)` or `SHA-256(nonce || payload)` depending on the manifest's `submission_identifier_derivation` setting. Every build/submit method returns `{ submissionId, submissionNonce }`.
+
+**`scopingId`** — the scoping input for `identity_hash = SHA-256(identityCommitment || scopingId)`. All write methods accept `scopingId` as the parameter name. What `scopingId` represents semantically varies by domain (a bucket period, a poll, a rail ID, etc.) but the parameter name is uniform.
+
+**`identity_hash`** — derived consistently across all clients as `SHA-256(identityCommitment || scopingId)`. No client exposes a domain-specific name for this value.
+
+**`idv_attestation_sig`** — the serialized transaction field for an IDV provider's attestation signature, used identically in voting, store, and chat transactions. Not named after any specific IDV provider.
+
+**`idv_proof_hash`** — the serialized transaction field for the proof hash binding a commitment to a verification workflow, used identically across all write transactions that carry IDV proof. Not named after any specific IDV provider.
+
+### Write-only posture
+
+When `resolveEffectivePosture` determines that write-only mode is active, the receipt store is suppressed: `match_store` is treated as `"none"` and `user_access` as `"never"`. Build methods still produce valid transaction envelopes; submit still works. The participant submits anonymously with no local state retained after the transaction confirms. The shared posture resolver now understands platform integrity, device attestation, hostile-network signals, HSM availability, and optional approved web-session state.
+
+**Web is structurally write-only for high-assurance deployments.** This is not merely because browsers lack a Play Integrity or App Attest equivalent — it is because web cannot provide a trusted hostile-environment negative. In deployments that set `write_only_on_hostile_network: true`, the runtime must supply a verified signal that the network is not hostile (no VPN, client IP not in the `high_risk_region_blocklist`). A browser has no trusted mechanism to produce this signal; any check at the browser layer is trivially spoofable by the adversary whose presence the check is meant to detect. Native mobile — iOS App Attest + OS-level VPN detection, or Android Play Integrity + `ConnectivityManager` — is the only client surface that can provide both the device-integrity signal and the network-hostility negative required to authorize recoverable posture.
+
+---
+
+## Client reference
+
+- [Count-match clients](/sdk/web/count-match) — `votingClient`, `wireClient`, `custodyClient`, `contractsClient`, `sharesClient`, `betsClient`, `lotsClient`
+- [Sealer-governed clients](/sdk/web/sealer) — `storeClient`, `chatClient`, `restClient`, `streamClient`, `browserClient`
+- [Utility clients](/sdk/web/utility) — `hopClient`, `camClient`, `IoTClient` — store semantics for relay, camera, and sensor surfaces
+- [identityClient](/sdk/web/identity) — commitment construction and IDV session management; used internally by all clients
+- [zkpClient](/sdk/web/zkp) — Groth16 nullifier proofs for the `shyvoting-v1` ZK tier
+
+---
+
+## Infrastructure interfaces
+
+The protocol has four external dependencies: a place to store canonical state, a way to authenticate callers, a way to record execution, and a way to sign period-close attestations. Each is expressed as an interface with multiple concrete implementations — which one runs is determined by environment variables, not by application code.
+
+| Interface | What the protocol calls | Concrete providers |
+|---|---|---|
+| `LedgerInterface` | `submitTwoListWrite`, `commitPeriodClose`, `getCount` | Fabric AMB, local Fabric peer, CockroachDB; `CoverTrafficInterface` decorator for timing indistinguishability |
+| `AuthInterface` | `verifyToken(bearerToken) → uid` | JWKS endpoint, Cognito |
+| `TelemetryInterface` | `startSpan`, `endSpan` | OpenTelemetry, X-Ray, noop |
+| `SigningInterface` | `sign(attestationPayload) → sig` | AWS KMS, GCP KMS, Vault, software |
+
+The four interfaces cover everything the protocol touches outside its own state machine. Anything not in this table is internal and not provider-specific. See [Interfaces](/sdk/web/adapters) for interface definitions and custom implementation instructions.
+
+---
+
+## Hosting and migration
+
+The same invariant can run in:
+
+- shared community hosting
+- hosted dedicated deployments
+- self-hosted deployments
+
+See [`Community-to-dedicated migration`](/sdk/web/migration) for the current
+cutover design and the distinction between service-layer migration and
+full ledger migration.

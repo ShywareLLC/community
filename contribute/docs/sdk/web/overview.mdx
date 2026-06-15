@@ -1,0 +1,140 @@
+---
+title: Web SDK overview
+description: JavaScript client modules for shyware domains and composable client profiles
+---
+
+## Installation
+
+```bash
+npm install github:NickCarducci/Shyware-SDK
+```
+
+Or pin a specific commit:
+
+```bash
+npm install github:NickCarducci/Shyware-SDK#<commit-sha>
+```
+
+In `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@co-mission/shyware-sdk": "github:NickCarducci/Shyware-SDK"
+  }
+}
+```
+
+The web SDK is ESM-only. Each embodiment has its own client module; there is no monolithic entry point.
+
+---
+
+## Pattern
+
+Every client follows the same three-step pattern:
+
+### 1. Validate and initialize from a shyconfig
+
+```js
+import { initializeFromShyConfig } from "shyware/sdk/web/votingClient.js";
+
+const client = await initializeFromShyConfig(shyconfig, {
+  // optional overrides
+  receiptStore: customStore, // custom receipt backend
+  apiBaseUrl: "https://api.yourdomain.com"
+});
+```
+
+`initializeFromShyConfig` calls `assertXManifest` internally. It throws a descriptive error if the manifest is missing required fields, specifies an unsupported contract version, or declares an incompatible identity mode. Initialization is idempotent.
+
+### 2. Build a transaction envelope
+
+```js
+const envelope = await client.buildBallot({
+  pollId: "proposal-42",
+  choice: "yes",
+  personId: "didit-journey-id"
+});
+// → { txJson, ballotId, ballotNonce, encSecret? }
+```
+
+Build methods return a transaction envelope — a JSON-serialized transaction payload plus any client-side metadata the caller needs to retain (receipt nonce, transfer ID, nullifier, etc.). The envelope is not yet submitted.
+
+### 3. Submit
+
+```js
+await client.submitBallot(envelope.txJson)
+// or combined:
+await client.castBallot({ ... })
+```
+
+Submit methods POST the `txJson` to the configured API endpoint. `castX` convenience methods combine build + submit in one call.
+
+---
+
+## Shared concepts
+
+### Identity commitment
+
+Every client delegates identity commitment construction to `identityClient.createIdentityCommitment`. The resulting commitment is a deterministic hash:
+
+```
+H(namespace : provider : source [:scope])
+```
+
+Where `source` is the provider-specific identifier (`personId` for Didit, `walletAddress` for wallet, `subjectId` for Identus).
+
+### Identity proof hash
+
+A separate `proofHash` binds the commitment to a specific verification workflow:
+
+```
+H("proof" : provider : source : workflowId : issuerDid : scope : audience : nonce)
+```
+
+Both values are constructed client-side from the `identity` block of the shyconfig and the caller's input — no network call required.
+
+### Write-only posture
+
+When `resolveEffectivePosture` determines that write-only mode is active, the receipt store is suppressed: `match_store` is treated as `"none"` and `user_access` as `"never"`. Build methods still produce valid transaction envelopes; submit still works. The participant submits anonymously with no local state retained after the transaction confirms. The shared posture resolver now understands platform integrity, device attestation, hostile-network signals, HSM availability, and optional approved web-session state.
+
+**Web is structurally write-only for high-assurance deployments.** This is not merely because browsers lack a Play Integrity or App Attest equivalent — it is because web cannot provide a trusted hostile-environment negative. In deployments that set `write_only_on_hostile_network: true`, the runtime must supply a verified signal that the network is not hostile (no VPN, client IP not in the `high_risk_region_blocklist`). A browser has no trusted mechanism to produce this signal; any check at the browser layer is trivially spoofable by the adversary whose presence the check is meant to detect. Native mobile — iOS App Attest + OS-level VPN detection, or Android Play Integrity + `ConnectivityManager` — is the only client surface that can provide both the device-integrity signal and the network-hostility negative required to authorize recoverable posture.
+
+---
+
+## Client modules
+
+Current taxonomy status:
+
+- `shyRBF` is the only completed application profile in the SDK today.
+- `shycam`, `shyIoT`, and `shyhop` are first-class utility clients (turnkey) but are not currently treated as standalone regulated domains.
+- `shylots` is now modeled as its own regulated auctions domain (`shylots-v1`).
+
+| Module                                     | Contract version                                                                     | Main export                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| [`votingClient.js`](/sdk/web/voting)       | `shyvoting-v1`                                                                       | `createVotingClient`, `initializeFromShyConfig`    |
+| [`chatClient.js`](/sdk/web/chat)           | `shychat-v1` messaging domain (`product_type: shychat`)                              | `createChatClient`, `initializeFromShyConfig`      |
+| [`sharesClient.js`](/sdk/web/shares)       | `shyshares-v1`                                                                       | `createSharesClient`, `initializeFromShyConfig`    |
+| [`custodyClient.js`](/sdk/web/custody)     | `shycustody-v1`                                                                      | `createCustodyClient`, `initializeFromShyConfig`   |
+| [`lotsClient.js`](/sdk/web/lots)           | `shylots-v1` regulated auctions domain (`product_type: shylots`)                     | `createLotsClient`, `initializeFromShyConfig`      |
+| [`contractsClient.js`](/sdk/web/contracts) | `shycontracts-v1`                                                                    | `createFinancingClient`, `initializeFromShyConfig` |
+| [`hopClient.js`](/sdk/web/hop)             | utility over store semantics (`product_type: shyhop\|shystream\|shycam\|shyiot`)     | `createHopClient`, `initializeFromShyConfig`       |
+| [`camClient.js`](/sdk/web/cam)             | utility over store semantics (`product_type: shycam\|shycustody\|shystream\|shyhop`) | `createCamClient`, `initializeFromShyConfig`       |
+| [`IoTClient.js`](/sdk/web/iot)             | utility over store semantics (`product_type: shyiot\|shycam`)                        | `createIotClient`, `initializeFromShyConfig`       |
+| [`wireClient.js`](/sdk/web/wire)           | `shywire-v1`                                                                         | `createWireClient`, `initializeFromShyConfig`      |
+| [`identityClient.js`](/sdk/web/identity)   | all                                                                                  | `createIdentityResolver`                           |
+| [`zkpClient.js`](/sdk/web/zkp)             | `shyvoting-v1` (ZK tier)                                                             | `initZKProver`, `generateProof`                    |
+
+---
+
+## Hosting and migration
+
+The same invariant can run in:
+
+- shared community hosting
+- hosted dedicated deployments
+- self-hosted deployments
+
+See [`Community-to-dedicated migration`](/sdk/web/migration) for the current
+cutover design and the distinction between service-layer migration and
+full ledger migration.

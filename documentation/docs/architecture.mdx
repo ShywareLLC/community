@@ -1,0 +1,156 @@
+---
+title: Architecture
+description: Two-list state machine, authority partition, identity tiers, and period-close attestation — shared across all shyware embodiments
+sidebar_position: 3
+---
+
+## The two-list write
+
+Every shyware embodiment reduces to a single atomic operation on the BFT ABCI state machine: a **two-list write** that structurally separates what was submitted from who submitted it.
+
+```
+List 1 — submission record
+  key:   scoping_id : submission_id        ← direction-free identifier. No identity.
+  value: domain-specific payload            ← ballot choice, transfer amount, secret ciphertext, etc.
+
+List 2 — participant registry
+  key:   scoping_id : identity_hash        ← who participated. No payload, no submission_id.
+  value: (empty or domain metadata)
+```
+
+`submission_id = H(submission_nonce)` for all embodiments — direction-free by construction. `identity_hash` is derived from the participant's identity credential scoped to the scoping period. These two values share **no derivation path**. No join key between List 1 and List 2 is ever written to canonical state.
+
+`identity_hash` derivation is uniform within each config type:
+
+| Config type | `identity_hash` |
+|---|---|
+| Voting (`shyvoting-v1`, `shyshares-v1`) | `H(voter_pub_key ‖ scoping_id)` — ephemeral keypair; IDV attests the key, not the secret |
+| Wire (`shywire-v1`, `shycustody-v1`, `shycontracts-v1`, `shybets-v1`, `shylots-v1`) | `H(wallet_address ‖ scoping_id)` — wallet commitment |
+| Sealer (`shystore-v1`, `shyrest-v1`, `shychat-v1`, `shybrowser-v1`, `shystream-v1`) | `H(sub ‖ scoping_id)` — JWT sub from authenticated session |
+
+### List 1 payload by embodiment
+
+| Embodiment | List 1 payload |
+|---|---|
+| `shyvoting-v1` | `{ choices }` |
+| `shywire-v1` | `{ amount, recipient_commitment }` |
+| `shycustody-v1` | `{ sku_class, quantity, evidence_refs }` |
+| `shycontracts-v1` | `{ amount, remittance_ref }` |
+| `shyshares-v1` | `{ weighted_choice }` |
+| `shybets-v1` | `{ side, outcome, stake, odds }` |
+| `shylots-v1` | `{ bid_amount }` (sealed until close) |
+| `shystore-v1` / `shyrest-v1` | sealed ciphertext (AES-GCM, participant-derived key) |
+| `shychat-v1` / `shystream-v1` | sealed message / segment ciphertext |
+| `shybrowser-v1` | sealed analytics ciphertext |
+
+---
+
+## Rejection predicate
+
+The state machine enforces the two-list invariant as a **rejection predicate** — it refuses any state transition that would write a join key between List 1 and List 2 into canonical state. This is not a policy applied on top of storage; it is the definition of what states the machine is permitted to reach.
+
+```
+ExecuteTx(tx) →
+  if derivable(identity_hash, submission_id, canonical_state') → REJECT
+  else → commit(List1_record, List2_record) atomically
+```
+
+A missing or extra record in either list causes the transaction to be rejected before any state change is committed. The count-match invariant `|L1(S)| = |L2(S)|` holds at every committed block height across all count-match embodiments.
+
+---
+
+## Authority partition
+
+Utility — verification, recovery, attribution, count-match remediation — is preserved through segregated authorities that cannot unilaterally reconstruct the identity–payload association:
+
+| Authority | Role | What it cannot do |
+|---|---|---|
+| **Eligibility / enrollment** | Registers participants; co-signs rescissions | Cannot write canonical state; cannot access off-chain linkage |
+| **IDV / KYC** | Attests identity; enables biometric re-derivation | Cannot forge submissions (never holds `sk_v` or sealer key) |
+| **Canonical runtime** | Enforces rejection predicate; commits List 1 + List 2 | Cannot derive identity from List 1 alone |
+| **Reconciling authority** | Holds off-chain linkage store; gates per-participant retrieval | Cannot enumerate all participants (non-composable API) |
+| **Signing / HSM** | Signs period-close attestation over disjoint Merkle roots | Holds no canonical state; cannot link List 1 to List 2 |
+
+Cross-authority collusion is the sole unfalsifiable residual risk. Each authority generates an independent auditable trail; collusion requires active coordination across all participating parties.
+
+---
+
+## Identity tiers
+
+### Standard tier — IDV-attested ephemeral key
+
+Used by all count-match embodiments. The participant device generates an ephemeral keypair `(sk, pk)` at submission time. The IDV provider attests `pk` scoped to the scoping period. `sk` is discarded immediately after signing the submission envelope.
+
+```
+Participant device          Canonical runtime             Managed signing boundary
+    │                             │                                │
+    ├─ generate (sk, pk) ─────────┤  Ed25519, per-scoping, ephemeral
+    │                             │                                │
+    ├─ request IDV attest ────────►                                │
+    │   SHA-256(pk ‖ scoping_id)  │                                │
+    │◄── provider_sig ────────────┤                                │
+    │                             │                                │
+    ├─ sign submission_nonce:scoping_id                            │
+    │   discard sk immediately    │                                │
+    │                             │                                │
+    ├─ submit tx ─────────────────►                                │
+    │                             ├─ verify participant_sig        │
+    │                             ├─ verify IDV attestation        │
+    │                             ├─ dedup on identity_hash (L2)   │
+    │                             ├─ commit List 1 record          │
+    │                             ├─ commit List 2 record          │
+    │                             │                                │
+    │          period close ──────►                                │
+    │                             ├─ compute Merkle roots          │
+    │                             ├─ sign(root1‖root2‖N) ─────────►
+    │                             │◄── attestation + public key ───┤
+    │                             ├─ commit PeriodCloseRecord      │
+```
+
+`identity_hash = SHA-256(pk ‖ scoping_id)`
+
+The IDV provider cannot forge a submission because it never holds `sk`. A forged submission would require inverting a random Ed25519 keypair — structural oracle prevention without ZK overhead.
+
+### ZK tier — commitment-blind (shyvoting-v1 only)
+
+The ZK tier adds a Groth16/BN254 nullifier circuit. The IDV attestation and `person_secret` become private circuit witnesses — never on-chain. The on-chain identity hash is `MiMC(person_secret, scoping_id)`, which the IDV provider cannot correlate back to its commitment database.
+
+```
+witness (private): person_secret, commitment, idv_commitment_sig
+public:            nullifier, scoping_id
+
+constraints:
+  MiMC(person_secret)              == commitment   // IDV-attested binding (private)
+  MiMC(person_secret, scoping_id)  == nullifier    // per-scoping dedup key (public)
+```
+
+Production requires a Groth16 MPC trusted-setup ceremony. See [ZKP setup](/sdk/zkp) for instructions. Single-party setup is dev-only.
+
+### Sealer tier — operator-sealer key (shystore, shychat, shybrowser, shystream)
+
+Sealer-governed embodiments replace the submission nonce with a **sealer key** derived by the participant using `deriveSealerKey()`. List 1 payload is AES-GCM encrypted before the canonical write — the ABCI layer stores ciphertext verbatim. `TxTypeAuthorityRescind` is structurally unavailable; erasure means the operator (reconciling authority) deletes the sealer key, making sealed payloads permanently undecryptable.
+
+---
+
+## Period-close attestation
+
+At period close the runtime computes two independent Merkle roots — one over direction-free submission identifiers (List 1), one over identity hashes (List 2) — and requests an HSM signature:
+
+```
+attestation_payload = SHA-256(
+  Merkle_root(sorted submission_ids)   // List 1
+  ‖ Merkle_root(sorted identity_hashes) // List 2
+  ‖ N (period participant count, big-endian int64)
+  ‖ domain-specific aggregate (tally counts, supply delta, etc.)
+)
+```
+
+The HSM signs over disjoint element sets — the two roots are computed from non-overlapping data. Any observer can verify aggregate correctness using only the HSM's public key. Individual attribution requires the protected off-chain linkage store, accessible only under lawful process.
+
+---
+
+## Sybil-audit signal
+
+After a period closes, participants can submit `TxTypeConfirmReceipt` to acknowledge that their `identity_hash` appears in List 2. The gap between `N` (total List 2 count) and confirmed receipts `K` is an observable fabrication signal: participants who cannot confirm their receipt may have had their entry fabricated by an operator.
+
+No ZK, no biometrics, no new oracle — the mechanism is structurally present in the two-list protocol across all embodiments that support receipt confirmation.

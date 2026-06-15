@@ -1,0 +1,58 @@
+---
+title: types — shystore
+description: Go types for the shystore-v1 state machine
+---
+
+Package `shystore` defines the domain types for `shystore-v1`.
+
+Import path: `github.com/NickCarducci/Shyware-SDK/domain/state/shystore`
+
+## BucketRecord
+
+```go
+type BucketRecord struct {
+    ScopingID          string   `json:"scoping_id"`
+    AllowedCategories []string `json:"allowed_categories"`
+}
+```
+
+Bucket-period metadata. `AllowedCategories` is the subset of `shyconfig.store.secret_categories` accepted in this bucket. Set at `NewBucket` time; immutable after creation.
+
+## RevealEventRecord
+
+```go
+type RevealEventRecord struct {
+    ScopingID    string `json:"scoping_id"`
+    SubmissionID    string `json:"submission_id"`
+    RequestedAt int64  `json:"requested_at"`
+}
+```
+
+Written to canonical state when `SecretReveal` is executed. Signals the off-chain reconciling authority to serve the sealed payload from the receipt store. Does not contain the payload.
+
+## StoreActionRecord
+
+```go
+type StoreActionRecord struct {
+    ActionID           string `json:"action_id"`
+    ScopingID           string `json:"scoping_id"`
+    IdentityHash       string `json:"identity_hash"`
+    ActionType         string `json:"action_type"` // "suppress" | "restore"
+    ReferencedActionID string `json:"referenced_action_id,omitempty"`
+    CommittedAt        int64  `json:"committed_at"`
+    CommittedHeight    int64  `json:"committed_height"`
+}
+```
+
+Appended to the authority-action log on `StoreAdverseAction`. Never deleted. `ReferencedActionID` links a `"restore"` back to the prior `"suppress"` on-chain.
+
+## StoreStateOptions
+
+```go
+type StoreStateOptions struct {
+    BeaconEnabled bool
+    PostureConfig PostureConfig
+}
+```
+
+Passed to `NewStoreStateWithOptions` to configure beacon-based submission identifier derivation and write-only posture signals.

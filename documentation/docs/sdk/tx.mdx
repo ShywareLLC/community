@@ -1,0 +1,126 @@
+---
+title: tx — voting / governance
+description: Transaction encoding, decoding, and stateless validation
+---
+
+```go
+import "github.com/populist/protocol/tx"
+```
+
+## Tx
+
+The canonical transaction envelope. All protocol transactions share this envelope;
+the `Type` field determines which `Data` payload struct to use.
+
+```go
+type Tx struct {
+    Type      uint8           // wire-format discriminator; see TxType* constants
+    Signature []byte          // sender authentication
+    Data      json.RawMessage // JSON payload
+}
+```
+
+### DecodeTx
+
+```go
+func DecodeTx(txBytes []byte) (*Tx, error)
+```
+
+Decodes a JSON-encoded transaction. Returns an error if the bytes are not valid JSON
+or do not conform to the `Tx` envelope schema.
+
+### EncodeTx
+
+```go
+func EncodeTx(tx *Tx) ([]byte, error)
+```
+
+Encodes a transaction to JSON bytes for broadcast over the canonical node.
+
+### Tx.Validate
+
+```go
+func (tx *Tx) Validate() error
+```
+
+Performs **stateless** validation:
+- `Type` must be one of the five `TxType*` constants
+- `Signature` must be non-empty
+- `Data` must be non-empty and valid JSON for the given type
+- Type-specific required fields are checked (e.g., `scoping_id`, ZK fields for ballots)
+
+Stateful checks (duplicate vote, ZK proof validity, IDV signature) are in `state.ValidateTx`.
+
+### Tx.UnmarshalData
+
+```go
+func (tx *Tx) UnmarshalData(v interface{}) error
+```
+
+Decodes `tx.Data` into the provided struct pointer. Use with the appropriate data type:
+
+```go
+var data tx.BallotCastData
+if err := transaction.UnmarshalData(&data); err != nil { ... }
+```
+
+## Data types
+
+### BallotCastData
+
+The most complex payload. It supports both the preferred non-ZK tier and the
+high-assurance ZK tier.
+
+```go
+type BallotCastData struct {
+    PollID             string
+    ZKNullifier        string   // optional in ZK tier: MiMC(person_secret, scoping_id)
+    ZKNullifierProof   []byte   // optional in ZK tier: Groth16 proof bytes
+    ZKCommitment       string   // optional in ZK tier: MiMC(person_secret)
+    DiditCommitmentSig []byte   // optional in ZK tier: sig over sha256(commitment ‖ scoping_id)
+    VoterPubKey        string   // required in preferred non-ZK tier; still present in current ZK flow
+    VoterSig           []byte   // required in preferred non-ZK tier; still present in current ZK flow
+    DiditDeviceSig     []byte   // required in preferred non-ZK tier
+    Choices            []string // vote direction(s)
+    BallotNonce        string   // random; submission_id = H(BallotNonce)
+    Timestamp          int64
+}
+```
+
+In the preferred non-ZK tier, the runtime derives `identity_hash` from
+`SHA-256(voter_pub_key ‖ scoping_id)` after validating `voter_sig` and
+`didit_device_sig`. In the ZK tier, the runtime uses `zk_nullifier` and
+`zk_nullifier_proof`. Which fields are required depends on whether a ZK
+verifier is loaded at startup.
+
+### PollCreateData
+
+```go
+type PollCreateData struct {
+    PollID       string
+    Question     string
+    Options      []string  // minimum 2
+    VotingMethod string    // defaults to "plurality"
+    StartTime    int64
+    EndTime      int64
+}
+```
+
+### ConfirmReceiptData
+
+```go
+type ConfirmReceiptData struct {
+    PollID       string
+    IdentityHash string  // ZK nullifier = MiMC(person_secret, scoping_id)
+}
+```
+
+### ValidatorRegistrationData
+
+```go
+type ValidatorRegistrationData struct {
+    PubKeyBase64 string  // 32-byte Ed25519 key, base64-encoded
+    Power        int64   // >0 to add; 0 to remove from active set
+    Name         string
+}
+```

@@ -1,0 +1,29 @@
+# ── Stage 1: Build shyvoting-api ─────────────────────────────────────────────
+# Build context must be the repo root (contains go.work + all modules).
+FROM golang:1.22-alpine AS builder
+RUN apk add --no-cache git
+
+WORKDIR /workspace
+
+COPY go.work go.work.sum ./
+COPY shyware/ ./shyware/
+COPY analytics/ ./analytics/
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o /shyvoting-api \
+    ./shyware/shyvoting/cmd/shyvoting-api/
+
+# ── Stage 2: Minimal runtime image ───────────────────────────────────────────
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /shyvoting-api /usr/local/bin/shyvoting-api
+RUN chmod +x /usr/local/bin/shyvoting-api
+
+EXPOSE 8080
+
+# CometBFT RPC and port are overridden by docker-compose / Kubernetes.
+CMD ["/usr/local/bin/shyvoting-api", \
+     "--cometbft-rpc", "http://localhost:26657", \
+     "--port", "8080"]

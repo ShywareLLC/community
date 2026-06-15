@@ -1,0 +1,142 @@
+---
+title: lotsClient
+description: Web SDK client for the shylots-v1 regulated auctions domain
+---
+
+> Initialize with [`initializeFromShyConfig`](/sdk/web/overview#pattern) — see the [Web SDK overview](/sdk/web/overview) for the common setup pattern.
+
+> Non-standard options for this client: `{ operatorMode: true }` to enable operator settlement methods.
+
+## Example shyconfig
+
+```json
+{
+  "contract_version": "shylots-v1",
+  "app": {
+    "id": "shylots",
+    "name": "Shylots",
+    "product_type": "shylots",
+    "chain_id": "shyware-1"
+  },
+  "custody": {
+    "asset_id": "lot-unit",
+    "transfer_layer": "shywire",
+    "accepted_sku_whitelist": ["warehouse_lot"],
+    "unit_of_measure": "lot",
+    "evidence_requirements": ["camera_session_ref", "operator_receipt_ref"]
+  },
+  "wire": {
+    "asset_id": "usd-lot",
+    "provider": "custom",
+    "issuer_name": "Shylots Settlement",
+    "backing_asset": "USD",
+    "provider_config": {
+      "mode": "sandbox",
+      "intent_path": "/wire-provider",
+      "settlement_asset": "USD",
+      "supported_rails": ["blockchain", "ach"],
+      "requires_operator_review": true
+    },
+    "supported_networks": ["base-sepolia"]
+  },
+  "lots": {
+    "market_operator": "operator-west",
+    "sale_modes": ["sealed_bid"],
+    "open_mode": "operator_attested_close",
+    "bid_visibility": "sealed_until_close",
+    "reserve_funding_mode": "bid_bond_transfer",
+    "settlement_asset_id": "usd-lot"
+  }
+}
+```
+
+## Discover lots
+
+```js
+await client.listMarketplaceLots({
+  status: "open",
+  operatorId: "operator-west"
+});
+// → IntakeLot[] with Shylots settlement and visibility metadata attached
+
+await client.getMarketplaceLot("lot-001");
+```
+
+The product client filters on top of `shycustody` lot records. It does not invent a second lot object type.
+
+## Bidder onboarding
+
+```js
+const account = await client.registerBidderAccount({
+  walletAddress: "0xabc..."
+});
+
+await client.getSettlementBalance(account.accountCommitment);
+```
+
+Bidder accounts are standard anonymous commitments. Funding, bid bonds, award settlement, and refunds all use the settlement asset declared in the `wire` and `lots` blocks.
+
+## Bid bond and settlement
+
+```js
+await client.transferBidBond({
+  senderCommitment: bidderCommitment,
+  recipientCommitment: escrowCommitment,
+  amount: 2500
+});
+
+await client.settleAwardTransfer({
+  senderCommitment: escrowCommitment,
+  recipientCommitment: sellerCommitment,
+  amount: 48000
+});
+```
+
+Both methods default to `lots.settlement_asset_id`, so the product can stay asset-consistent without repeating the settlement asset at each call site.
+
+## Funding and payout intents
+
+```js
+await client.createFundingIntent({
+  amount: 50000,
+  destinationNetwork: "base-sepolia",
+  destinationAddress: "0xescrow..."
+});
+
+await client.createPayoutIntent({
+  amount: 47500,
+  accountCommitment: sellerCommitment,
+  payoutRail: "ach",
+  payoutDestination: "seller-bank-ref"
+});
+```
+
+These are just shywire provider intents surfaced through the product client so the marketplace can support pre-funding and post-award payout flows.
+
+## Lot redemption
+
+```js
+await client.requestLotRedemption({
+  requestId: "redeem-001",
+  accountCommitment: winnerCommitment,
+  warehouseId: "wh-1",
+  skuClassId: "warehouse_lot",
+  siloAmount: 1,
+  requestedQuantity: 1,
+  destinationRef: "dock-3"
+});
+```
+
+Redemption still lands on the custody layer. `Shylots` simply defaults the asset and wraps the call in a market-oriented surface.
+
+## Product boundary
+
+`Shylots` gives you the commercial base today:
+
+- private lot inventory
+- sealed-bid market posture in the manifest
+- bid-bond and settlement wiring
+- custody-backed redemption
+- evidence-aware lot discovery
+
+If you later add timed opening, threshold reveal, or clearing-rule logic, that should layer on top of this family rather than pretend those semantics already exist.

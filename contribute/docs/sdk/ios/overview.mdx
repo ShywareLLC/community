@@ -1,0 +1,123 @@
+---
+title: iOS SDK
+description: Swift Package for anonymous voting, governance, and value transfer on iOS and macOS
+---
+
+## Install
+
+Add the package to your Xcode project or `Package.swift`:
+
+```swift
+// Package.swift
+.package(url: "https://github.com/NickCarducci/Shyware-iOS-client.git", from: "0.1.0")
+```
+
+Or via Xcode: **File → Add Package Dependencies** → paste the URL.
+
+---
+
+## Initialization
+
+The iOS SDK loads a `ShyConfig` manifest, validates it, then creates a `VotingClient`.
+
+```swift
+import ShywareSDK
+
+// Decode your shyconfig.json
+let config = try JSONDecoder().decode(ShyConfig.self, from: shyconfigData)
+
+let attester = AppAttestProvider(
+    storageKey: "com.example.shyware.attest.keyId",
+    registrationURL: URL(string: "https://vote.example.com/api/attest/register")
+)
+
+let client = try VotingClient.from(
+    config,
+    assertionProvider: attester.assertionProvider()
+)
+```
+
+---
+
+## Device attestation (required for receipt confirmation)
+
+Before casting a ballot, resolve runtime signals and apply them to the client:
+
+```swift
+let signals = await attester.resolveSignals(
+    network: .init(hostile: false)
+)
+await client.setRuntimeSignals(signals)
+await client.fetchOperatorPosture()
+```
+
+After signals are set, check effective posture:
+
+```swift
+let posture = await client.effectivePosture()
+if posture.writeOnly {
+    // Show write-only UI: ballot submitted but receipt cannot be confirmed on this device
+} else {
+    // Full recoverable flow: receipt persisted to Keychain
+}
+```
+
+See [iOS Attestation](/sdk/ios/attestation) for the full App Attest integration guide.
+
+---
+
+## Cast a ballot
+
+```swift
+let result = try await client.castBallot(
+    pollId: "proposal-42",
+    choice: "yes",
+    input: .didit(personId: diditPersonId)
+)
+// result.ballotId    — direction-free public identifier
+// result.ballotNonce — private receipt material; do not expose
+```
+
+If the posture is `recoverable`, the receipt is persisted to the iOS Keychain automatically.
+
+---
+
+## Read polls and tally
+
+```swift
+let polls = try await client.getAllPolls()
+let poll = try await client.getPoll("proposal-42")
+let tally = try await client.getTally("proposal-42")
+```
+
+---
+
+## Verify a receipt
+
+```swift
+let votes = try await client.getVotes("proposal-42")
+let receipt = try client.loadReceipt(pollId: "proposal-42")
+
+let result = await client.verifyReceipt(
+    nonce: receipt!.ballotNonce,
+    expectedChoice: "yes",
+    votes: votes
+)
+// result.verified == true → ballot confirmed on-chain
+```
+
+Verification is offline — no server contact required. It computes `SHA-256(nonce)` and scans the public vote list.
+
+---
+
+## Other embodiments
+
+The current Swift package is centered on the voting client. Additional embodiment-specific clients can follow the same package pattern once their Swift surfaces are finalized:
+
+```swift
+// Future Swift modules can follow the same shyconfig-driven shape:
+// ShySharesClient.from(config)
+// ShyWireClient.from(config)
+// ShyCustodyClient.from(config)
+// ShyContractsClient.from(config)
+```

@@ -1,0 +1,219 @@
+---
+title: Adapter interfaces
+description: Infrastructure-agnostic adapter layer — swap ledger, auth, telemetry, and signing backends via environment variables
+sidebar_position: 3
+---
+
+## Overview
+
+Every shyware consumer app wires together four adapters. The application code — `submitTwoListWrite`, `commitPeriodClose`, `castBallot`, etc. — is identical regardless of which concrete adapters are active. Only environment variables and deployment configuration change between environments.
+
+```
+Consumer app
+  └── LedgerAdapter       — where the two-list canonical state lives
+  └── AuthAdapter         — how bearer tokens are verified
+  └── TelemetryAdapter    — where spans and traces go
+  └── SigningAdapter       — who signs period-close attestations
+```
+
+This is not abstraction for its own sake. The shyconfig regime requires it: the same protocol invariants must hold whether the ledger is AWS Managed Blockchain, a self-hosted Docker peer, a native systemd peer, or a future CometBFT node. The adapter boundary is where invariant-preservation becomes testable.
+
+---
+
+## LedgerAdapter
+
+**Interface** (`adapters/ledger/interface.js`):
+
+```js
+export class LedgerAdapter {
+  async submitTwoListWrite(scopingId, list1, list2) {}                          // atomic two-list write
+  async getCount(scopingId)                          {}                          // count-match query
+  async rescindTwoListWrite(scopingId, submissionId, identityHash) {}           // bilateral withdrawal
+  async replaceTwoListWrite(scopingId, oldId, newList1, identityHash) {}        // direction change — replace List 1 entry
+  async commitPeriodClose(scopingId, l1Root, l2Root, attestation) {}           // period-close HSM attestation
+  async disconnect()                                 {}
+}
+```
+
+All five write/query methods map directly to chaincode functions. The adapter is the only place in the consumer stack that knows the ledger's address, TLS configuration, or authentication credentials.
+
+:::warning
+`list2.identityHash` **must include the scopingId as a derivation input**: `H(uid || scopingId)`. Using `H(uid)` alone breaks cross-scoping unlinkability — the same participant's identity commitment would be identical across all transaction-scoping identifiers, enabling cross-scoping correlation from canonical state.
+
+Use `deriveIdentityHash(uid, scopingId)` from `protocol/submissionId.js`.
+:::
+
+### FabricLedgerAdapter
+
+The reference implementation (`adapters/ledger/fabric.js`). Supports AWS Managed Blockchain (`amb`) and self-hosted Hyperledger Fabric (`local`). `FABRIC_MODE` is **required** — the adapter throws if it is not set.
+
+**`FABRIC_MODE=amb` — AWS Managed Blockchain**
+
+| Variable | Required | Description |
+|---|---|---|
+| `FABRIC_MODE` | ✓ | `amb` |
+| `AMB_NODE_ENDPOINT` | ✓ | Full peer hostname — no truncation. Format: `nd-{nodeId}.{memberId}.{networkId}.managedblockchain.us-east-1.amazonaws.com:30006`. A truncated value causes silent connection failures. |
+| `AMB_TLS_CERT_PATH` | ✓ | Path to `managedblockchain-tls-chain.pem` on EC2 (e.g. `/home/ubuntu/managedblockchain-tls-chain.pem`). Missing this causes all AMB ledger calls to throw "path argument must be of type string or Buffer". Also accepted as `FABRIC_TLS_CERT`. |
+| `FABRIC_ADMIN_CERT` or `AMB_ADMIN_CERT_PATH` | ✓ | Path to admin MSP signing cert |
+| `FABRIC_ADMIN_KEY` or `AMB_ADMIN_KEY_PATH` | ✓ | Path to admin MSP keystore directory |
+| `AMB_MEMBER_ID` | ✓ | AMB member ID (used as MSP ID) |
+| `AMB_NETWORK_ID` | ✓ | AMB network ID |
+| `AMB_CA_ENDPOINT` | ✓ | AMB CA endpoint |
+
+`FABRIC_CHANNEL`, `FABRIC_CHAINCODE`, and `FABRIC_MSP_ID` are hardcoded to `shyware` / `Org1MSP` and must not be set.
+
+**`FABRIC_MODE=local` — Self-hosted Fabric (Docker or native)**
+
+| Variable | Required | Description |
+|---|---|---|
+| `FABRIC_MODE` | ✓ | `local` |
+| `FABRIC_PEER_ENDPOINT` | ✓ | Peer address, e.g. `peer0.org1.example.com:7051` |
+| `FABRIC_TLS_CERT` | ✓ | Path to peer TLS CA cert (`tls/ca.crt`). Do **not** set when `FABRIC_PEER_TLS_DISABLED=true`. |
+| `FABRIC_ORDERER_TLS_CERT` | ✓ | Path to orderer TLS CA cert |
+| `FABRIC_ADMIN_CERT` | ✓ | Path to admin MSP signing cert |
+| `FABRIC_ADMIN_KEY` | ✓ | Path to admin MSP keystore directory |
+| `FABRIC_PEER_TLS_DISABLED` | — | When `true`, uses `grpc://` (plaintext) instead of `grpcs://`. Required for Docker peer deployments where `CORE_PEER_TLS_ENABLED=false`. |
+
+**Configuration by deployment type:**
+
+| | AMB — Cognito + X-Ray | AMB — JWKS + OTel | Docker peer | Native systemd |
+|---|---|---|---|---|
+| `FABRIC_MODE` | `amb` | `amb` | `local` | `local` |
+| `AUTH_PROVIDER` | `cognito` | `jwks` | `jwks` | `jwks` |
+| `TELEMETRY_PROVIDER` | `xray` | `otel` | `otel` | `otel` |
+| `FABRIC_PEER_TLS_DISABLED` | — | — | `true` | — |
+| Peer endpoint | AMB managed | AMB managed | `peer0.org1.example.com:7051` | `peer0.org1.example.com:7051` |
+| Docker required | no | no | yes (peer only) | **no** |
+| Submit latency | ~1–2s | ~1–2s | ~3–5s | ~2–3s |
+
+The operator ledger server is unchanged across all deployment types. Only the environment variables differ. See [Hyperledger Fabric deployment](/operations/fabric-deployment) for setup instructions per type.
+
+### Implementing a custom LedgerAdapter
+
+For a non-Fabric ledger (CometBFT, another BFT engine, or a different Fabric network):
+
+```js
+import { LedgerAdapter } from '@shyware-sdk/adapters/ledger/interface.js'
+
+export class MyLedgerAdapter extends LedgerAdapter {
+  async submitTwoListWrite(scopingId, list1, list2) {
+    // Post to your BFT endpoint
+    // Must atomically write L1 (payload, no identity) and L2 (identity, no payload)
+    // Must enforce: no join key between L1 and L2 in any reachable canonical state
+  }
+  // ... remaining methods
+}
+```
+
+The protocol invariant is enforced at the state-machine level, not the adapter level. A custom adapter that writes to a state machine without the rejection predicate does not provide the two-list guarantee.
+
+---
+
+## AuthAdapter
+
+**`AUTH_PROVIDER=cognito`** — `CognitoAuthAdapter`: verifies **AccessToken** (not IdToken) using `aws-jwt-verify` with `tokenUse: 'access'`. Reads `AUTH_USER_POOL_ID` (or `COGNITO_USER_POOL_ID`) and `AUTH_CLIENT_ID` (or `COGNITO_CLIENT_ID`). If you send an IdToken it returns 401. Does **not** read `CLOUD_REGION` for Cognito — the Cognito region is derived from the pool ID: `poolId.split('_')[0]`.
+
+**`AUTH_PROVIDER=jwks`** — `JwksAuthAdapter`: verifies JWTs against a JWKS endpoint. Reads `AUTH_JWKS_URI`. **Requires `jose` to be installed** (`npm install jose`). `jose` is a dynamic import — if missing, all API calls return 401 silently with no error log. The JWKS URI region must come from the Cognito pool ID, not from `CLOUD_REGION` / `AWS_REGION`.
+
+Both adapters produce the same `uid` string for the same authenticated user. The consumer app sees no difference. Prefer JWKS for new deployments — it is provider-agnostic and works identically across AMB and self-hosted.
+
+---
+
+## TelemetryAdapter
+
+**`TELEMETRY_PROVIDER=xray`** — `XRayTelemetryAdapter`: emits spans directly to the X-Ray daemon UDP at `localhost:2000`. Reads `AWS_XRAY_DAEMON_ADDRESS`. Use when running without an ADOT sidecar.
+
+**`TELEMETRY_PROVIDER=otel`** — `OtelTelemetryAdapter`: emits spans via OTLP to an OpenTelemetry collector (ADOT sidecar). Reads `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4317`). The collector forwards to X-Ray. Spans are identical in the X-Ray console — the adapter is transparent to the trace store.
+
+**`TELEMETRY_PROVIDER=noop`** — `NoopTelemetryAdapter`: all spans are discarded. For test environments.
+
+Span names are identical across adapters: `fabric.peer.submit`, `fabric.peer.query`, `fabric.peer.period-close`.
+
+---
+
+## SigningAdapter
+
+Three production-grade adapters are available. All produce the same attestation format — `Sign(SHA-256(l1MerkleRoot || l2MerkleRoot || scopingId || timestamp))` — verifiable by any party with the public key.
+
+**`SIGNING_PROVIDER=aws-kms`** — `AwsKmsSigningAdapter`: AWS KMS ECC_NIST_P256 (FIPS 140-3 L2).
+
+| Variable | Fallback | Description |
+|---|---|---|
+| `SIGNING_KEY_ID` | `KMS_KEY_ID` | KMS key ARN or alias |
+| `CLOUD_REGION` | `AWS_REGION` | AWS region |
+
+**`SIGNING_PROVIDER=gcp-kms`** — `GcpKmsSigningAdapter`: Google Cloud KMS EC_SIGN_P256_SHA256. Uses Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS`, Workload Identity, or `gcloud auth`).
+
+| Variable | Description |
+|---|---|
+| `SIGNING_KEY_ID` | Full resource name: `projects/{p}/locations/{l}/keyRings/{r}/cryptoKeys/{k}/cryptoKeyVersions/{v}` |
+| `GCP_PROJECT` + `GCP_KEY_RING` + `GCP_KEY_NAME` | Alternative to full resource name; `GCP_KEY_VERSION` defaults to `1`, `GCP_LOCATION` to `global` |
+
+**`SIGNING_PROVIDER=vault`** — `VaultSigningAdapter`: HashiCorp Vault Transit (`ecdsa-p256`). Works on-prem and across any cloud.
+
+| Variable | Default | Description |
+|---|---|---|
+| `VAULT_ADDR` | `http://127.0.0.1:8200` | Vault server URL |
+| `VAULT_TOKEN` | — | Vault token with `transit/sign` capability |
+| `SIGNING_KEY_ID` | `VAULT_TRANSIT_KEY` | Transit key name |
+| `VAULT_TRANSIT_MOUNT` | `transit` | Mount path |
+
+**`SIGNING_PROVIDER=software`** — `SoftwareSigningAdapter`: local Node.js crypto. Dev and test only — key is ephemeral unless a PEM is supplied.
+
+---
+
+## Protocol derivation functions
+
+`protocol/submissionId.js` provides the correct derivation functions. Use these rather than ad-hoc UUID or `H(uid)` derivations.
+
+```js
+import {
+  deriveSubmissionId,   // beacon-conditioned: H(canonicalBlockHash || nonce)
+  deriveIdentityHash,   // scoping-bound: H(uid || scopingId)
+  generateSubmissionNonce
+} from '@shyware-sdk/protocol/submissionId.js';
+
+const blockHash = await ledgerAdapter.getLatestBlockHash();
+const nonce = generateSubmissionNonce();
+const submissionId = await deriveSubmissionId(blockHash, nonce);
+const identityHash = await deriveIdentityHash(uid, scopingId);
+
+await ledgerAdapter.submitTwoListWrite(
+  scopingId,
+  { submissionId, payloadCommitment: H(payload) },
+  { identityHash }
+);
+```
+
+:::note
+`getLatestBlockHash()` is a planned addition to the `LedgerAdapter` interface. Until available, beacon-conditioned identifiers can be approximated using the block height from `getCount()` or the peer CLI.
+:::
+
+---
+
+## Verified scenario results
+
+The adapter matrix has been tested against four embodiments across all ledger and auth combinations:
+
+| Embodiment | Scenarios | AMB Cognito+X-Ray | AMB JWKS+OTel | Docker JWKS | Native JWKS |
+|---|---|---|---|---|---|
+| shychat | 14 | ✓ 14/14 | ✓ 14/14 | ✓ 14/14 | ✓ 14/14 |
+| shywire | 8 | ✓ | ✓ | ✓ | ✓ |
+| shybrowser | 8 | ✓ | ✓ | ✓ | ✓ |
+| shyvoting (coercion-resistant) | 8 | ✓ | ✓ | ✓ | ✓ |
+
+---
+
+## Shared environment variables
+
+These do not vary by ledger backend:
+
+| Variable | Notes |
+|---|---|
+| `COCKROACH_URL` | CockroachDB connection string |
+| `MASTER_CRYPT_KEY` | Payload sealing key |
+| `AUTH_USER_POOL_ID` / `COGNITO_USER_POOL_ID` | Same pool across all deployment types |
+| `SIGNING_KEY_ID` | Signing key identifier — ARN for AWS/GCP KMS, key name for Vault |
+| `CLOUD_REGION` / `AWS_REGION` | Cloud region — Cognito region is derived from the pool ID prefix, not this var |
+| `AUTH_JWKS_URI` | `https://cognito-idp.{pool_region}.amazonaws.com/{POOL_ID}/.well-known/jwks.json` |
+| `AMB_TLS_CERT_PATH` | `/home/ubuntu/managedblockchain-tls-chain.pem` — AMB deployments only |

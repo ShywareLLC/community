@@ -1,0 +1,126 @@
+---
+title: state — wire / transfer
+description: Two-list transfer state machine and its invariants
+---
+
+Package `state` implements the anonymous transfer state machine used by the
+fintech embodiments.
+Import path: `github.com/NickCarducci/Shyware-SDK/shywire/state`
+
+---
+
+## Invariants enforced on every block
+
+The state machine enforces three properties before any transfer is committed:
+
+```
+1. len(transferRecords) == len(participants)       — count-match
+2. nullifier not in participants                   — no double-spend
+3. sender.Balance >= Amount                        — value conservation (plaintext scaffold)
+```
+
+A transfer that violates any invariant causes `ExecuteTransfer` to return an error and
+the transaction to be rejected. The block is committed with the failing transaction excluded.
+
+---
+
+## State lifecycle
+
+```
+CheckTx(txBytes)
+  → DecodeTx + Validate()          // stateless only; fast path for mempool admission
+
+FinalizeBlock(txs)
+  → for each tx:
+      switch tx.Type:
+        RegisterAsset    → executeRegisterAsset
+        Mint             → executeMint
+        Burn             → executeBurn
+        Transfer         → executeTransfer   // two-list write + invariant checks
+        RegisterAccount  → executeRegisterAccount
+  → enforce count-match: len(L1) == len(L2)
+
+Commit()
+  → flush LevelDB writes
+  → return AppHash (Merkle root of state)
+
+Query(path, data)
+  → "supply/{asset_id}"       → SupplyRecord
+  → "account/{commitment}"    → AccountRecord (balance only; no identity)
+  → "transfer/{id}"           → TransferRecord (List 1 only)
+  → "transfers/count"         → int
+```
+
+---
+
+## executeTransfer — the core state transition
+
+```
+1. DecodeTx → TransferData
+2. Look up sender AccountRecord (by SenderCommitment + AssetID)
+3. Check sender.Balance >= Amount  → ErrorInsufficientBalance if not
+4. Check nullifier not in participants  → ErrorDuplicateTransfer if found
+5. transfer_id = H(TransferNonce)
+6. Write TransferRecord to List 1 (prefix "tx:")
+7. Write ParticipantRecord to List 2 (prefix "participant:")
+8. Debit sender.Balance -= Amount
+9. Credit recipient.Balance += Amount
+10. Assert len(L1) == len(L2)  → panic if violated (should be impossible)
+```
+
+Steps 6 and 7 are written in a single atomic LevelDB batch. Step 10 is a post-condition
+assertion — if it fires, it indicates a bug in the state machine, not a malformed transaction.
+
+---
+
+## List storage layout
+
+```
+LevelDB key space:
+
+"tx:{transfer_id}"              → TransferRecord  (List 1)
+"participant:{nullifier}"       → ParticipantRecord  (List 2)
+"account:{commitment}:{asset}"  → AccountRecord
+"supply:{asset_id}"             → SupplyRecord
+"asset:{asset_id}"              → AssetRecord
+"val:{pubkey_b64}"              → ValidatorRecord
+```
+
+List 1 and List 2 are stored under separate prefixes and are never queried together by
+the state machine. Joining them requires an off-chain process with access to the
+authority or audit store — the operator audit function.
+
+---
+
+## Value conservation in the production circuit
+
+When the Pedersen commitment circuit is complete, `executeTransfer` will be extended to:
+
+```
+1–4. (same)
+5. Verify ZK proof: SenderProof proves balance >= amount using Pedersen commitments
+6. transfer_id = H(TransferNonce)
+7. Write TransferRecord (AmountCommitment) to List 1
+8. Write ParticipantRecord (nullifier) to List 2
+9. Update BalanceCommitment for sender (homomorphic subtraction)
+10. Update BalanceCommitment for recipient (homomorphic addition)
+11. Assert len(L1) == len(L2)
+```
+
+The canonical runtime never observes plaintext amounts or balances in this mode. Conservation is
+proven by the ZK circuit, not checked by direct comparison.
+
+---
+
+## Public query surface
+
+The following are queryable without operator credentials:
+
+| Path | Returns |
+|---|---|
+| `/supply/{asset_id}` | `SupplyRecord` — total minted, burned, supply |
+| `/transfers/count` | Total number of transfers (= `len(L1)`) |
+| `/transfer/{transfer_id}` | `TransferRecord` — amount + asset, no identity |
+
+Account balances are **not** in the public query surface. The sender can query their own
+balance by presenting their `account_commitment` to the operator's admin API.

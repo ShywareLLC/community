@@ -1,0 +1,49 @@
+{
+  "name": "shyware",
+  "description": "fintech embodiment family for anonymous contracts, custody, and wrapped transfers",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#A78BFA",
+    "light": "#C4B5FD",
+    "dark": "#7C3AED",
+    "background": {
+      "dark": "#09090B"
+    }
+  },
+  "font": {
+    "headings": { "family": "Inter" },
+    "body": { "family": "Inter" }
+  },
+  "topbarLinks": [
+    { "name": "Co-Mission", "url": "https://co-mission.fyi" }
+  ],
+  "topbarCtaButton": {
+    "name": "Get a license",
+    "url": "mailto:nick@populist.vote"
+  },
+  "navigation": [
+    {
+      "group": "Overview",
+      "pages": ["introduction", "quickstart", "architecture"]
+    },
+    {
+      "group": "Embodiments",
+      "pages": ["deployments/stablecoin", "deployments/neobank", "deployments/sovereign"]
+    },
+    {
+      "group": "SDK Reference",
+      "pages": ["sdk/types", "sdk/tx", "sdk/state"]
+    },
+    {
+      "group": "HTTP API",
+      "pages": ["api/overview", "api/transfers", "api/supply", "api/accounts"]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/co-mission/shyware"
+  }
+}

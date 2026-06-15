@@ -1,0 +1,220 @@
+---
+title: custody
+description: HTTP API for shycustody-v1 physical commodity custody
+---
+
+The shycustody API is served by the shywire API server. Custody routes share the server with wire transfer and contract routes under the same base URL.
+
+## Base URL
+
+Configured via `shyconfig.api.base_url`.
+
+## Authentication
+
+| Tier | Endpoints | Auth |
+|---|---|---|
+| Public | Policy, operator, SKU reads | — |
+| User | `POST /custody/redemptions`, balance reads | Bearer token |
+| Operator | All `POST` writes except redemption requests | Operator JWT + `operatorMode: true` |
+
+## Endpoint summary
+
+### Policy
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/custody/policies` | List all consortium policies |
+| `GET` | `/custody/policies/current` | Get the active policy |
+| `GET` | `/custody/policies/{policy_id}` | Get a policy by ID |
+| `POST` | `/custody/policies` | Register a consortium policy (operator) |
+
+### Operators
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/custody/operators` | List registered warehouse operators |
+| `GET` | `/custody/operators/{operator_id}` | Get a warehouse operator |
+| `POST` | `/custody/operators` | Register a warehouse operator (operator) |
+
+### SKU classes
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/custody/skus` | List accepted SKU classes |
+| `GET` | `/custody/skus/{sku_class_id}` | Get a SKU class |
+| `POST` | `/custody/skus` | Register a SKU class (operator) |
+
+### Lots
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/custody/lots` | List all intake lots |
+| `GET` | `/custody/lots/{lot_id}` | Get a lot record |
+| `POST` | `/custody/lots` | Record a custody intake lot (operator) |
+
+### Redemptions
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/custody/redemptions` | List redemption requests |
+| `GET` | `/custody/redemptions/{request_id}` | Get a redemption request |
+| `POST` | `/custody/redemptions` | Request a redemption (participant) |
+| `POST` | `/custody/redemptions/settle` | Settle a redemption (operator) |
+
+### Settlements
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/custody/settlements` | List settlements |
+| `GET` | `/custody/settlements/{settlement_id}` | Get a settlement |
+
+### Demurrage
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/custody/demurrage` | List demurrage assessments |
+| `GET` | `/custody/demurrage/{assessment_id}` | Get a demurrage assessment |
+| `POST` | `/custody/demurrage` | Apply demurrage (operator) |
+
+---
+
+## POST /custody/policies
+
+Registers the consortium governance policy. Operators and SKU classes referenced by `active_operator_ids` and `accepted_sku_class_ids` must be registered first.
+
+```json
+{
+  "policy_id":               "policy-2026-q2",
+  "asset_id":                "vault-gold-1",
+  "name":                    "Q2 2026 Policy",
+  "active_operator_ids":     ["op-west"],
+  "accepted_sku_class_ids":  ["XAU-9999"],
+  "unit_of_measure":         "troy_oz",
+  "quantity_normalization":  "grade_weight_nav",
+  "shipping_adjustment_ref": "",
+  "demurrage_rate_bps":      25,
+  "operator_fee_bps":        50,
+  "redemption_mode":         "physical_goods_only",
+  "redemption_routing":      "holder_chooses_warehouse",
+  "evidence_requirements":   ["camera_session_ref", "operator_receipt_ref"],
+  "timestamp":               1741651200
+}
+```
+
+---
+
+## POST /custody/operators
+
+```json
+{
+  "operator_id":      "op-west",
+  "name":             "West Vault",
+  "warehouse_id":     "wh-001",
+  "region":           "us-west-2",
+  "video_stream_ref": "stream://wh-001",
+  "status":           "active",
+  "timestamp":        1741651200
+}
+```
+
+---
+
+## POST /custody/skus
+
+```json
+{
+  "sku_class_id":          "XAU-9999",
+  "name":                  "London Good Delivery",
+  "grade_band":            "999.9",
+  "unit_of_measure":       "troy_oz",
+  "normalized_factor_bps": 10000,
+  "storage_class":         "standard",
+  "status":                "active",
+  "timestamp":             1741651200
+}
+```
+
+---
+
+## POST /custody/lots
+
+Records a physical commodity intake lot after the warehouse operator attests receipt via shycam/shystream. `minted_amount` is the silo units created; `quantity` is the physical quantity in `unit_of_measure`. `evidence_refs` are `type:id` strings linking to off-chain evidence.
+
+```json
+{
+  "lot_id":                 "lot-001",
+  "policy_id":              "policy-2026-q2",
+  "asset_id":               "vault-gold-1",
+  "operator_id":            "op-west",
+  "warehouse_id":           "wh-001",
+  "account_commitment":     "<H(wallet_address)>",
+  "sku_class_id":           "XAU-9999",
+  "quantity":               100,
+  "minted_amount":          1000000,
+  "operator_fee_amount":    500,
+  "shipping_cost_amount":   200,
+  "storage_reserve_amount": 300,
+  "video_session_ref":      "cam-session-abc123",
+  "evidence_refs":          ["camera_session_ref:cam-abc123", "operator_receipt_ref:rcpt-99"],
+  "timestamp":              1741651200
+}
+```
+
+---
+
+## POST /custody/redemptions
+
+Requests redemption. `silo_amount` is the silo units to burn; `requested_quantity` is the physical quantity expected back. Participants choose their warehouse via `warehouse_id`.
+
+```json
+{
+  "request_id":         "<H(random)>",
+  "asset_id":           "vault-gold-1",
+  "account_commitment": "<H(wallet_address)>",
+  "warehouse_id":       "wh-001",
+  "sku_class_id":       "XAU-9999",
+  "silo_amount":        500000,
+  "requested_quantity": 50,
+  "destination_ref":    "dock-3",
+  "timestamp":          1741651200
+}
+```
+
+---
+
+## POST /custody/redemptions/settle
+
+Settles after the warehouse confirms physical release. `burn_amount` is the silo units burned; `settled_quantity` is the physical quantity released.
+
+```json
+{
+  "settlement_id":   "<H(random)>",
+  "request_id":      "redeem-001",
+  "operator_id":     "op-west",
+  "warehouse_id":    "wh-001",
+  "fulfillment_ref": "warehouse-release-99",
+  "burn_amount":     500000,
+  "settled_quantity": 50,
+  "settled_at":      1741651200
+}
+```
+
+---
+
+## POST /custody/demurrage
+
+Applies a demurrage charge against a holder's account commitment for a given storage period.
+
+```json
+{
+  "assessment_id":      "<H(random)>",
+  "asset_id":           "vault-gold-1",
+  "account_commitment": "<H(wallet_address)>",
+  "policy_id":          "policy-2026-q2",
+  "amount":             125,
+  "period_start":       1770000000,
+  "period_end":         1780000000,
+  "reason":             "storage_fee_q2",
+  "applied_at":         1780000000
+}
+```

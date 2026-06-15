@@ -1,0 +1,7 @@
+<svg width="120" height="20" viewBox="0 0 120 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Mark: two horizontal bars representing List 1 / List 2 separation -->
+  <rect x="0" y="5" width="22" height="3" rx="1.5" fill="#A78BFA"/>
+  <rect x="0" y="12" width="14" height="3" rx="1.5" fill="#A78BFA"/>
+  <!-- Wordmark -->
+  <text x="30" y="15" font-family="Inter, -apple-system, sans-serif" font-weight="600" font-size="13" fill="#FAFAFA" letter-spacing="-0.3">shyware</text>
+</svg>

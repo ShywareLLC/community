@@ -1,0 +1,42 @@
+---
+title: iotClient
+description: shyware utility for sealed telemetry and device events
+---
+
+> Initialize with [`initializeFromShyConfig`](/sdk/web/overview#pattern) — see the [Web SDK overview](/sdk/web/overview) for the common setup pattern.
+
+## Purpose
+
+shyIoT is a shyware utility module for sealing telemetry and device event payloads as utility records.
+
+## Manifest requirements
+
+- store block must be present
+- app.product_type may be shyiot or shycam
+- when store is present, SDK defaults `anon_layer.black_box_required` to `true`
+- when store is present, SDK requires one of: `anon_layer.shyPayload=true` or `anon_layer.shyIDV=true`
+- when store is present and neither toggle is set, SDK defaults `anon_layer.shyPayload=true`
+- required flows:
+  - iot_event_store
+  - iot_event_reveal
+  - biometric_rederive
+
+## API surface
+
+Main module:
+
+- shyware/sdk/web/IoTClient.js
+
+Primary exports:
+
+- createIotClient
+- assertIotManifest
+- initializeFromShyConfig
+- formatIotError
+- createIotUtility (alias)
+
+Core operations:
+
+- sealTelemetryRecord
+- revealTelemetryRecord
+- rotateTelemetryRecord

@@ -1,0 +1,100 @@
+---
+title: iOS Distribution
+description: Recommended repository and release structure for the private Shyware iOS Swift package
+---
+
+## Recommended repository shape
+
+For remote Swift Package Manager consumption, the iOS client should live in its own repository with `Package.swift` at the repository root.
+
+Recommended private repository name:
+
+```text
+Shyware-iOS-client
+```
+
+Recommended root layout:
+
+```text
+Shyware-iOS-client/
+├── Package.swift
+├── README.md
+├── Sources/
+│   └── ShywareSDK/
+└── Tests/
+    └── ShywareSDKTests/
+```
+
+This keeps the Swift package consumable from Xcode and `Package.swift` without exposing the broader monorepo.
+
+---
+
+## Local development layout
+
+The working tree for `Shyware-iOS-client` can still live inside the broader development checkout:
+
+```text
+Populist-Full/
+└── shyware/
+    └── sdk/
+        └── ios/
+```
+
+In that setup:
+
+- `shyware/sdk/ios` is its own git repository
+- its `origin` points to `NickCarducci/Shyware-iOS-client`
+- the parent monorepo ignores `shyware/sdk/ios/`
+
+This preserves easy local development while still satisfying SwiftPM's requirement that the package repository root contain `Package.swift`.
+
+---
+
+## Why not a nested package path?
+
+SwiftPM source control dependencies resolve packages from the repository root. A package that only exists in a subdirectory works locally, but not as a normal remote package dependency from GitHub.
+
+That is why the iOS package must have its own repository boundary even if its local working tree sits inside a larger checkout.
+
+---
+
+## Shared docs strategy
+
+Keep the Mintlify docs as the documentation hub for the full protocol and SDK family.
+
+Recommended split:
+
+- Shared Mintlify docs: protocol, platform comparisons, architecture, API, and cross-SDK guides
+- Private iOS package repo: only Swift package source, tests, and a short package README
+
+This avoids duplicating docs across repositories while keeping the Swift package clean for consumers.
+
+Mintlify supports monorepo docs paths and can also use additional repositories as workflow context, so the docs repo does not need to own the iOS package code directly.
+
+---
+
+## Suggested release flow
+
+1. Develop the iOS SDK in the monorepo.
+2. Commit and push from `shyware/sdk/ios`, which is the `Shyware-iOS-client` repository.
+3. Tag a version such as `0.1.0`.
+4. Consume that tag from Xcode or `Package.swift`.
+
+Install from SwiftPM:
+
+```swift
+.package(url: "https://github.com/NickCarducci/Shyware-iOS-client.git", from: "0.1.0")
+```
+
+---
+
+## Minimal package README
+
+The package repo README should stay short and client-focused:
+
+- install instructions
+- supported platforms
+- import example
+- pointer back to the shared Mintlify docs
+
+Keep operator internals, deployment notes, and non-client architecture out of the package repo unless they are required for SDK consumers.

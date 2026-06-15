@@ -1,0 +1,135 @@
+---
+title: Quickstart
+description: Initialize a client, build a transaction, and verify the result
+sidebar_position: 2
+---
+
+## Prerequisites
+
+- Node.js 18+ (web SDK)
+- Go 1.22+ (runtime / ABCI node)
+- Docker and Docker Compose (local node)
+
+---
+
+## 1. Start a local node
+
+```bash
+shyware-abci --config shyconfig.json --db-path /tmp/shyware-dev --addr :26658
+shyware-api  --config shyconfig.json --port 8080
+```
+
+Set `identity.provider: "none"` in your local `shyconfig.json` for development — the `NoopVerifier` skips IDV checks and derives a deterministic identity hash from the submitted public key.
+
+For a full Docker Compose setup with CometBFT:
+
+```bash
+cd deploy/node/cometbft && docker compose up
+```
+
+---
+
+## 2. Initialize a client
+
+```js
+import { initializeFromShyConfig } from '@co-mission/shyware-sdk/votingClient.js'
+
+const shyconfig = await fetch('/shyconfig.json').then(r => r.json())
+const client = initializeFromShyConfig(shyconfig)
+
+const summary = client.initialize()
+// → { contractVersion: "shyvoting-v1", appId: "my-deployment", posture: "recoverable", ... }
+```
+
+---
+
+## 3. Read submissions
+
+```js
+const polls   = await client.getAllSubmissions()
+const poll    = await client.getSubmission('polls', scopingId)
+const tally   = await client.getSubmissionTally('polls', scopingId)
+const records = await client.getSubmissionRecords('polls', scopingId)
+```
+
+---
+
+## 4. Cast a submission
+
+```js
+const { submissionId, submissionNonce } = await client.voteSubmission({
+  scopingId: 'proposal-42',
+  payload:   'yes',
+  personId:  'didit-journey-id'
+})
+// submissionId  — direction-free; publicly visible on-chain
+// submissionNonce — private receipt; retain for post-close self-verification
+```
+
+The client derives `identity_hash = H(identityCommitment || scopingId)`, generates `submissionNonce`, builds `TxTypeBallotCast`, POSTs to `{api.base_url}/ballots`, and persists the receipt to the configured store.
+
+---
+
+## 5. Verify the tally
+
+```js
+const tally = await client.getSubmissionTally('polls', 'proposal-42')
+// → { counts, totalVotes, confirmedCount, merkleRoot1, merkleRoot2, publicKey, signature }
+```
+
+Verify the HSM signature independently:
+
+```bash
+go run shyware/verify/cmd/verify --api http://localhost:8080 --poll proposal-42
+# → Tally signature: VALID · Total: 42 · Confirmed: 39 / 42
+```
+
+---
+
+## 6. Verify your own receipt
+
+```js
+const records = await client.getSubmissionRecords('polls', 'proposal-42')
+const verified = await client.verifyReceipt(submissionNonce, 'yes', records)
+// → boolean — recomputes submissionId locally, no server contact
+```
+
+---
+
+## Other embodiments
+
+```js
+// Weighted governance (shyshares)
+import { initializeFromShyConfig } from '@co-mission/shyware-sdk/sharesClient.js'
+const client = initializeFromShyConfig(shyconfig)
+await client.voteSubmission({ scopingId: proposalId, payload: 'yes', personId: commitment })
+
+// Value transfer (shywire)
+import { initializeFromShyConfig } from '@co-mission/shyware-sdk/wireClient.js'
+const client = initializeFromShyConfig(shyconfig)
+await client.wireSubmission({ scopingId: assetId, amount: 100, senderCommitment, recipientCommitment })
+
+// Secret storage (shystore)
+import { initializeFromShyConfig } from '@co-mission/shyware-sdk/storeClient.js'
+const client = initializeFromShyConfig(shyconfig, { getAuthHeaders, deriveSealerKey, signMessage })
+await client.storeSubmission({ scopingId: bucketId, plaintext, category })
+
+// Commodity custody (shycustody)
+import { initializeFromShyConfig } from '@co-mission/shyware-sdk/custodyClient.js'
+const client = initializeFromShyConfig(shyconfig)
+await client.buildRequestRedemption({ scopingId: assetId, amount: 5.0, redeemerCommitment })
+
+// Revenue financing (shycontracts)
+import { initializeFromShyConfig } from '@co-mission/shyware-sdk/contractsClient.js'
+const client = initializeFromShyConfig(shyconfig)
+await client.buildContractExecution({ contractId, partyCommitment, executionType: "remittance", sourceRef: "inv-001", amount: 12500 })
+```
+
+---
+
+## Next steps
+
+- [shyconfig manifest](/sdk/web/shyconfig) — full manifest reference
+- [Architecture](/architecture) — two-list state machine, identity tiers, count-match invariant
+- [Web SDK overview](/sdk/web/overview) — uniform primitives, client module table
+- [ZK tier](/sdk/web/zkp) — high-assurance nullifier setup

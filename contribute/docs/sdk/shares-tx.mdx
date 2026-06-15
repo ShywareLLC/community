@@ -1,0 +1,65 @@
+---
+title: tx — shyshares
+description: Transaction envelope and routing for shyshares-v1
+---
+
+Package `tx` defines the `shyshares-v1` transaction envelope that routes to the correct sub-state machine.
+
+Import path: `github.com/NickCarducci/Shyware-SDK/shyshares/tx`
+
+## Envelope
+
+`shyshares` runs two sub-protocols on one CometBFT chain — `shyvoting` for anonymous weighted ballots and `shywire` for stake movement. Every transaction submitted to a shyshares chain is wrapped in an `Envelope` so the ABCI app can route without ambiguity.
+
+```go
+type Envelope struct {
+    Protocol string          `json:"protocol"` // "shyvoting" | "shywire"
+    Payload  json.RawMessage `json:"payload"`  // raw JSON of the sub-protocol tx
+}
+```
+
+## Protocol discriminators
+
+```go
+const (
+    ProtocolVoting = "shyvoting"
+    ProtocolWire   = "shywire"
+)
+```
+
+## Wrapping transactions
+
+```go
+// Wrap a shyvoting ballot tx (already JSON-encoded)
+envelopeBytes, err := tx.WrapVoting(ballotTxJSON)
+
+// Wrap a shywire transfer tx (already JSON-encoded)
+envelopeBytes, err := tx.WrapWire(transferTxJSON)
+```
+
+Both functions marshal the `Envelope` struct and return the raw bytes for `BroadcastTx`.
+
+## Decoding
+
+```go
+envelope, err := tx.DecodeEnvelope(raw)
+switch envelope.Protocol {
+case tx.ProtocolVoting:
+    // route to shyvoting sub-state machine
+case tx.ProtocolWire:
+    // route to shywire sub-state machine
+}
+```
+
+The ABCI app calls `DecodeEnvelope` in `FinalizeBlock` before dispatching to the appropriate sub-machine. Sub-machine `ValidateTx` and `ExecuteTx` operate on `envelope.Payload` directly.
+
+## Governance actions
+
+Queued governance actions are created and dispatched separately from the ballot/wire envelope path:
+
+```go
+func NewQueuedAction(proposal GovernanceProposal) QueuedGovernanceAction
+func BuildActionDispatch(action QueuedGovernanceAction, dispatchedBy string) map[string]any
+```
+
+`NewQueuedAction` converts a closed proposal into a `QueuedGovernanceAction`. `BuildActionDispatch` produces the canonical dispatch payload for the `/actions/{id}/dispatch` API endpoint.

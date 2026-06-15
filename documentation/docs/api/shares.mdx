@@ -1,0 +1,86 @@
+---
+title: shares
+description: HTTP API for shyshares-v1 weighted governance
+---
+
+The shyshares API serves the `shyshares-v1` ABCI state machine — anonymous weighted governance with queued canonical actions. Wire transfer endpoints from the `shywire` sub-machine are available on the same server for stake movement.
+
+## Base URL
+
+Configured via `shyconfig.api.base_url`.
+
+## Endpoint summary
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/organizations` | List governance organizations |
+| `GET` | `/organizations/:id` | Get an organization record |
+| `GET` | `/memberships/:account_commitment` | Get membership snapshot for a commitment |
+| `GET` | `/proposals` | List proposals |
+| `POST` | `/proposals` | Create a proposal |
+| `GET` | `/proposals/:id` | Get a proposal |
+| `POST` | `/proposals/:id/close` | Close a proposal and commit tally attestation |
+| `POST` | `/ballots` | Submit a weighted ballot (anonymous two-list write) |
+| `GET` | `/tallies/:proposal_id` | Get the HSM-signed tally for a closed proposal |
+| `GET` | `/actions` | List queued governance actions |
+| `GET` | `/actions/:id` | Get a governance action |
+| `POST` | `/actions/:id/dispatch` | Dispatch a queued governance action on-chain |
+
+Wire transfer endpoints (`/assets`, `/accounts`, `/transfers`, `/supply`) are also registered on the same server for stake movement between member accounts.
+
+## POST /proposals
+
+```json
+{
+  "proposal_id": "prop-001",
+  "organization_id": "dao-main",
+  "title": "Treasury allocation Q3",
+  "options": ["approve", "reject", "abstain"],
+  "voting_method": "weighted",
+  "end_time": 1780000000
+}
+```
+
+## POST /ballots
+
+Broadcasts a `WeightedBallot` transaction — an anonymous two-list write using the shyvoting sub-machine.
+
+```json
+{
+  "protocol": "shyvoting",
+  "payload": {
+    "proposal_id": "prop-001",
+    "choice": "approve",
+    "weight": 1500,
+    "submission_nonce": "<32-byte hex>",
+    "account_commitment": "<member commitment>",
+    "sender_pub_key": "<Ed25519 hex>",
+    "sender_sig": "...",
+    "idv_attestation": { ... }
+  }
+}
+```
+
+The ballot is wrapped in a `tx.Envelope` with `"protocol": "shyvoting"` so the ABCI app routes it to the voting sub-machine.
+
+## GET /tallies/:proposal_id
+
+Returns the HSM-signed tally after a proposal is closed. Verifiable by any party with the HSM's public key.
+
+```json
+{
+  "proposal_id": "prop-001",
+  "options": ["approve", "reject", "abstain"],
+  "counts": [12500, 4200, 300],
+  "total_weight": 17000,
+  "total_members": 42,
+  "merkle_root_1": "...",
+  "merkle_root_2": "...",
+  "public_key": "...",
+  "signature": "..."
+}
+```
+
+## POST /actions/:id/dispatch
+
+Dispatches a queued governance action to canonical state. The action was created off-chain and queued pending governance approval; dispatch commits it on-chain with the tally result as authority.

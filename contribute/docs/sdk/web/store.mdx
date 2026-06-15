@@ -1,0 +1,100 @@
+---
+title: storeClient
+description: Confidential secret storage for shystore-v1 deployments — health records, credentials, TOTP seeds, and any sealed payload
+---
+
+> Initialize with [`initializeFromShyConfig`](/sdk/web/overview#pattern) — see the [Web SDK overview](/sdk/web/overview) for the common setup pattern.
+
+> Non-standard options for this client: `deriveSealerKey`, `signMessage`, `getIdentityAttestation`.
+
+## Initialize
+
+```js
+const client = initializeFromShyConfig(shyconfig, {
+  getAuthHeaders: async () => ({ Authorization: `Bearer ${token}` }),
+  deriveSealerKey: async () => derivedKeyMaterial,  // AES-GCM participant-derived key
+  signMessage: async (msg) => ({ pubKeyHex, sigBytes }), // Ed25519 oracle-forgery prevention
+  getIdentityAttestation: async (scope) => ({ diditDeviceSig })
+});
+
+const state = client.initialize();
+// → { secretCategories, recoveryMode, selectiveDisclosure, enumerationProtection, ... }
+```
+
+`deriveSealerKey` is required for sealed-payload encryption. The ABCI layer stores ciphertext verbatim — plaintext never leaves the device.
+
+## Bucket lifecycle
+
+Secrets are grouped into **buckets** (period boundaries with HSM-signed closure records).
+
+```js
+// Operator creates a bucket before participants store
+await client.createBucket({ bucketID: "bucket-2026-q2", allowedCategories: ["auth_seed_totp"] });
+
+const buckets = await client.listBuckets();
+const bucket  = await client.getBucket("bucket-2026-q2");
+```
+
+## Store a secret
+
+```js
+const { secretID, secretNonce } = await client.storeSecret({
+  bucketID:    "bucket-2026-q2",
+  plaintext:   { service: "github.com", seed: "BASE32SEED..." },
+  category:    "auth_seed_totp",
+  partitionID: "sealed"
+});
+```
+
+`storeSecret` seals the payload client-side (AES-GCM), then broadcasts `TxTypeSecretStore` — an atomic List 1 + List 2 write. The runtime validates the two-list invariant before committing.
+
+## Reveal a secret
+
+```js
+const sealed = await client.revealSecret({ secretID, bucketID });
+const plain  = await client.revealAndDecryptSecret({ secretID, bucketID });
+```
+
+`revealSecret` emits a `reveal_requested` event and returns the sealed payload from the reconciling authority. `revealAndDecryptSecret` additionally calls `openSecret` with `deriveSealerKey`.
+
+## Rotate a secret (recoverable posture only)
+
+```js
+const { newSecretID, newSecretNonce } = await client.rotateSecret({
+  bucketID,
+  secretID,
+  newPlaintext: { service: "github.com", seed: "NEWBASE32..." }
+});
+```
+
+Rotation swaps the List 1 payload; List 2 and the two-list invariant are preserved.
+
+## Local sealing helpers
+
+```js
+const sealed = await client.sealSecret(plaintext);
+const plain  = await client.openSecret(sealed);
+```
+
+Both are no-ops if `store.sealer.mode` or `store.payload_encryption.mode` is not set — safe to call unconditionally.
+
+## Close a bucket
+
+```js
+await client.closeBucket({ bucketID: "bucket-2026-q2", closingHeight: 42100 });
+const closure = await client.getBucketClosure("bucket-2026-q2");
+// → HSM-signed ClosureRecord over the sealed payload set
+```
+
+## Recovery receipts
+
+```js
+await client.writeRecoveryReceipt(bucketID, secretID);
+const receipt = await client.readRecoveryReceipt(bucketID, secretID);
+```
+
+Off-chain receipts enable biometric re-derivation on a new device: the participant re-derives the sealer key via IDV, then reads the recovery receipt to locate their secrets without a memorized secret.
+
+## Structural guarantee
+
+The canonical ledger never holds plaintext. Enumeration of "which secrets belong to which participant" is structurally impossible from canonical state alone — `GET /api/store/secrets/all` returns 403 by construction. Cross-participant correlation requires collusion between the authentication provider (which holds `sub`) and the reconciling authority (which holds off-chain linkage), neither of which can unilaterally reconstruct the association.

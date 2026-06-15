@@ -1,0 +1,71 @@
+{
+  "$schema": "./shyconfig.schema.json",
+  "contract_version": "shycontracts-v1",
+  "app": {
+    "id": "vau-money",
+    "name": "vau.money",
+    "product_type": "shycontracts",
+    "chain_id": "shyware-1"
+  },
+  "domains": {
+    "public": {
+      "splash": "vau.money"
+    },
+    "private": {
+      "console": "REDACTED_PRELAUNCH"
+    }
+  },
+  "anon_layer": {
+    "sdk_id": "shyware-web-v1",
+    "black_box_required": true,
+    "required_flows": [
+      "contract_register",
+      "contract_activate",
+      "remittance_submit"
+    ]
+  },
+  "api": {
+    "base_url": "/api",
+    "submit_base_url": "/api",
+    "requires_auth": false,
+    "auth_scheme": "none",
+    "storage_key": "vau_api_base"
+  },
+  "identity": {
+    "provider": "identus",
+    "mode": "stable_person_id",
+    "workflow_id": "REDACTED",
+    "kyc_required": true,
+    "recommended_idv": "didit",
+    "byoid_policy": "allowed",
+    "byoid_label": "Bring your own verified identity",
+    "issuer_did": "did:prism:REDACTED",
+    "presentation_mode": "proof_hash"
+  },
+  "signing": {
+    "required": true,
+    "backend": "aws_kms_x_aws_cloudhsm",
+    "validator_key_id": "alias/shyware-validator",
+    "tally_key_id": "alias/shyware-tally",
+    "contract_key_id": "alias/shyware-contract",
+    "external_hsm": "aws_cloudhsm",
+    "external_hsm_key_name": "shyware-signing-root",
+    "external_hsm_uri": "https://REDACTED.managedhsm.azure.net",
+    "attestation_required": true
+  },
+  "deployment": {
+    "default_posture": "recoverable",
+    "runtime_fallbacks": {
+      "write_only_on_missing_play_integrity": true,
+      "write_only_on_hostile_network": true,
+      "write_only_on_untrusted_device_attestation": true
+    }
+  },
+  "financing": {
+    "goal_gated": true,
+    "return_basis": "project_profit",
+    "remittance_source_mode": "matched_customer_revenue",
+    "funding_mode": "staggered_waitlist",
+    "transfer_layer": "shywire"
+  }
+}

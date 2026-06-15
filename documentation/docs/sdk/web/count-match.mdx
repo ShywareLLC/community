@@ -1,0 +1,581 @@
+---
+title: Count-match clients
+description: API reference for votingClient, wireClient, custodyClient, contractsClient, sharesClient, betsClient, lotsClient
+---
+
+> Initialize with [`initializeFromShyConfig`](/sdk/web/overview#pattern). See the [overview](/sdk/web/overview) for the common setup pattern and uniform primitives.
+
+| Client | Contract version | Non-standard init options |
+|---|---|---|
+| `votingClient.js` | `shyvoting-v1` | — |
+| `wireClient.js` | `shywire-v1` | `operatorMode` |
+| `custodyClient.js` | `shycustody-v1` | `operatorMode` |
+| `contractsClient.js` | `shycontracts-v1` | — |
+| `sharesClient.js` | `shyshares-v1` | `operatorMode` |
+| `betsClient.js` | `shybets-v1` | — |
+| `lotsClient.js` | `shylots-v1` | `operatorMode` |
+
+All count-match clients enforce `|L1| = |L2|` at period close. `voteSubmission` / `wireSubmission` / `storeSubmission` write List 1 and List 2 atomically. Attribution of who submitted what requires the reconciling authority's off-chain linkage store.
+
+---
+
+## votingClient
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/votingClient.js'
+
+const client = initializeFromShyConfig(shyconfig, {
+  getAuthHeaders,    // optional — async () => headers
+  runtimeSignals,    // optional — sets initial device/network trust signals
+  storageKey         // optional — localStorage key for API base override
+})
+```
+
+**Runtime signals and posture**
+
+Runtime signals control whether the client operates in `recoverable` or `write_only` posture. Set at init via `options.runtimeSignals` or update after:
+
+```js
+client.setRuntimeSignals({
+  playIntegrity:     { available: true, passed: true },
+  deviceAttestation: { trusted: true },
+  network:           { hostile: false },
+  hsm:               { available: true },
+  webSession:        { approved: true, expiresAt: unixTs }
+})
+
+const posture = client.getEffectivePosture()
+// → { configuredPosture, effectivePosture, fallbackActive, fallbackReasons, writeOnly }
+
+client.getRuntimeSignals()    // current normalized signals
+client.getConfiguredPosture() // manifest default_posture only
+client.getReceiptPolicy()     // effective receipt config after posture
+client.getAuthorityMatrix()   // per-authority read/write access table
+```
+
+Write-only posture: `voteSubmission` returns `{ submissionId, writeOnly: true }` — no nonce, no payload retained after submission.
+
+**Read**
+
+```js
+await client.getAllSubmissions()                              // all polls
+await client.getSubmission('polls', scopingId)
+await client.getSubmissionTally('polls', scopingId)          // HSM-signed tally
+await client.getSubmissionRecords('polls', scopingId)        // List 1 records (closed polls)
+await client.getSubmissionParticipantCount('polls', scopingId)
+await client.getSubmissionConfirmedCount('polls', scopingId) // confirmed receipt count
+```
+
+**Build separately or cast in one call**
+
+```js
+// Build only — returns envelope; check posture before submitting
+const { txJson, submissionId, hexNonce, identityHash } = await client.buildVote({
+  scopingId, payload: 'yes', personId: 'didit-journey-id'
+})
+await client.submitVote(txJson)                // posts to /submissions
+await client.submitVote(txJson, 'submissions') // type param — default "submissions"
+
+// Build + submit combined
+const { submissionId, hexNonce, identityHash } = await client.voteSubmission({
+  scopingId: 'poll-42',
+  payload:   'yes',
+  personId:  'didit-journey-id'
+})
+```
+
+`hexNonce` is the private receipt — store it to verify your submission post-close. `identityHash` is the List 2 record for this submission.
+
+**Rescind / replace**
+
+```js
+await client.rescindVote({ scopingId, personId })
+await client.replaceVote({ scopingId, newPayload: 'no', personId })
+```
+
+**Receipt and confirmation**
+
+```js
+// Local receipt verification — no server contact
+const verified = await client.verifyReceipt(hexNonce, 'yes', submissionRecords)
+
+// Managed receipt store (recoverable posture only)
+const receipt = await client.getPrivateReceipt(scopingId)
+await client.savePrivateReceipt(scopingId, { payload, submissionId, submissionNonce, identityHash, submittedAt })
+
+// On-chain confirmation (Sybil signal — requires live biometric re-auth)
+await client.confirmReceipt(scopingId)
+```
+
+**Operator — flush queued ballots**
+
+```js
+await client.flushQueuedSubmissions('submissions', scopingId)
+```
+
+**Audit**
+
+```js
+await client.getReattestationAudit(scopingId)
+await client.getIdvAudit(scopingId)
+await client.getEligibilityActions({ scopingId, personId })
+await client.checkSubmissionPresence(submissionId)  // → { exists: boolean }
+```
+
+**Identity helpers**
+
+```js
+await client.createIdentityCommitment(input, { namespace: 'stable_identity' })
+await client.createIdentityProofHash(input, { scope: scopingId, audience: appId })
+client.normalizeManagedIdentity(idvStatusObject)  // normalize IDV provider response
+client.normalizeByoid(input)                       // normalize BYOID input
+```
+
+**Payload formats**
+
+| Voting method | `payload` |
+|---|---|
+| `yes_no` | `"yes"` or `"no"` |
+| `plurality` | `"option_id"` |
+| `approval` | `["opt_a", "opt_b"]` |
+| `ranked_choice` | `["first", "second", "third"]` |
+
+---
+
+## wireClient
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/wireClient.js'
+// Pass { operatorMode: true } to unlock asset registration, mint, burn, and intent routes
+```
+
+`shywire-v1` requires `identity.provider: "wallet"` in the shyconfig. Account commitments are derived from wallet addresses, not IDV person IDs.
+
+**Account registration**
+
+Pass `walletAddress` — the client derives the commitment and signs it internally using `personal_sign` via an injected Ethereum provider:
+
+```js
+const { accountCommitment } = await client.registerAccount({ walletAddress })
+```
+
+Or supply a pre-derived commitment and proof explicitly:
+
+```js
+import { createWalletProofBase64 } from 'shyware/sdk/web/walletProof.js'
+const accountCommitment = await client.createIdentityCommitment(walletAddress, { namespace: 'account' })
+const walletProofBase64 = await createWalletProofBase64({ accountCommitment, walletAddress })
+await client.registerAccount({ accountCommitment, walletProofBase64 })
+```
+
+**Read**
+
+```js
+await client.getAsset(scopingId)
+await client.getSupply(scopingId)   // → { total_minted, total_burned, total_supply } — public, no auth
+await client.getBalance(scopingId, accountCommitment)  // requires getAuthHeaders at init
+```
+
+**Transfer**
+
+```js
+const { txJson, submissionId, submissionNonce, nullifier } = await client.buildWire({
+  scopingId,
+  senderCommitment,
+  recipientCommitment,
+  amount: 250
+})
+await client.submitWire(txJson)
+// or: await client.wireSubmission({ scopingId, senderCommitment, recipientCommitment, amount })
+```
+
+`nullifier = H(senderCommitment:scopingId:submissionNonce)` — the double-spend key written to List 2. The state machine rejects any transfer whose nullifier already appears in canonical state. Store `submissionNonce` as your receipt; the `nullifier` is publicly verifiable on-chain.
+
+**Operator — asset setup**
+
+```js
+const operatorClient = initializeFromShyConfig(shyconfig, { getAuthHeaders, operatorMode: true })
+
+await operatorClient.registerAsset({ assetId: 'usdc-shywire', name: 'Oneway USD', decimals: 2 })
+```
+
+**Operator — on-chain mint / burn**
+
+Direct ABCI mint/burn — posts to `/mint` and `/burn`. Use when the operator controls the full on-ramp/off-ramp lifecycle:
+
+```js
+await operatorClient.issueWire({ assetId, accountCommitment, amount })
+await operatorClient.redeemWire({ assetId, accountCommitment, amount })
+```
+
+**Operator — off-chain provider intents (Circle / custom)**
+
+Builds a structured intent payload and posts to `{wire.provider_config.intent_path}/issue-intents` or `/redeem-intents`. Use when a third-party stablecoin provider (Circle, custom) fulfills the on-ramp/off-ramp and the operator coordinates asynchronously:
+
+```js
+await operatorClient.createIssueIntent({ amount, destinationNetwork, destinationAddress, externalReference })
+await operatorClient.createRedeemIntent({ amount, accountCommitment, payoutRail, payoutDestination })
+```
+
+Both intent methods require `operatorMode: true`. If `wire.provider_config.intent_path` is not set in the shyconfig, they return `{ persisted: false, payload }` without posting.
+
+---
+
+## custodyClient
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/custodyClient.js'
+// Pass { operatorMode: true } for asset registration, mint, lot recording, and settlement
+```
+
+**Read**
+
+```js
+await client.getCurrentPolicy()
+await client.listPolicies()
+await client.getPolicy(policyId)
+await client.listOperators()
+await client.getOperator(operatorId)
+await client.listSkuClasses()
+await client.getSkuClass(skuClassId)
+await client.getSupply(assetId)                    // public
+await client.getBalance(assetId, accountCommitment) // requires auth
+await client.listLots()
+await client.getLot(lotId)
+await client.listRedemptions()
+await client.getRedemption(requestId)
+await client.listSettlements()
+await client.getSettlement(settlementId)
+await client.listDemurrage()
+await client.getDemurrageAssessment(assessmentId)
+```
+
+**Operator — consortium setup (one-time, in order)**
+
+Operators and SKU classes must be registered before the policy that references them.
+
+```js
+const operatorClient = initializeFromShyConfig(shyconfig, { getAuthHeaders, operatorMode: true })
+
+await operatorClient.registerAsset({ assetId: 'vault-gold-1', name: 'Vaults Gold', decimals: 4 })
+
+await operatorClient.registerWarehouseOperator({
+  operatorId: 'op-west', name: 'West Vault', warehouseId: 'wh-001',
+  region: 'us-west-2', videoStreamRef: 'stream://wh-001', status: 'active'
+})
+
+await operatorClient.registerAcceptedSkuClass({
+  skuClassId: 'XAU-9999', name: 'London Good Delivery',
+  gradeBand: '999.9', unitOfMeasure: 'troy_oz',
+  normalizedFactorBps: 10000, storageClass: 'standard', status: 'active'
+})
+
+await operatorClient.registerConsortiumPolicy({
+  policyId: 'policy-2026-q2', assetId: 'vault-gold-1', name: 'Q2 2026 Policy',
+  activeOperatorIds:    ['op-west'],
+  acceptedSkuClassIds:  ['XAU-9999'],
+  unitOfMeasure:        'troy_oz',
+  quantityNormalization:'grade_weight_nav',
+  demurrageRateBps:     25,
+  operatorFeeBps:       50,
+  redemptionMode:       'physical_goods_only',
+  redemptionRouting:    'holder_chooses_warehouse',
+  evidenceRequirements: ['camera_session_ref', 'operator_receipt_ref']
+})
+
+const { accountCommitment } = await operatorClient.registerAccount({ walletAddress })
+```
+
+**Operator — record intake lot**
+
+After the warehouse physically receives the commodity and the operator attests it via shycam/shystream:
+
+```js
+await operatorClient.buildRecordIntakeLot({
+  lotId:                'lot-001',
+  policyId:             'policy-2026-q2',
+  assetId:              'vault-gold-1',
+  operatorId:           'op-west',
+  warehouseId:          'wh-001',
+  accountCommitment,               // depositor's account commitment
+  skuClassId:           'XAU-9999',
+  quantity:             100,       // troy oz
+  mintedAmount:         100_0000,  // silo units minted (4 decimals → 100.0000 oz)
+  operatorFeeAmount:    500,
+  shippingCostAmount:   200,
+  storageReserveAmount: 300,
+  videoSessionRef:      'cam-session-abc123',
+  evidenceRefs:         ['camera_session_ref:cam-abc123', 'operator_receipt_ref:rcpt-99']
+})
+```
+
+**Operator — mint silo shares to depositor**
+
+```js
+await operatorClient.mintSilo({ assetId: 'vault-gold-1', accountCommitment, amount: 100_0000 })
+```
+
+**Participant — transfer silo shares**
+
+```js
+const { txJson, transferId, nullifier } = await client.buildTransferSilo({
+  assetId: 'vault-gold-1', senderCommitment, recipientCommitment, amount: 50_0000
+})
+await client.submitTransferSilo(txJson)
+```
+
+`nullifier = H(senderCommitment:assetId:transferNonce)`. Returns `{ transferId, nullifier }` — no `submissionNonce`.
+
+**Participant — request redemption**
+
+```js
+const { txJson, requestId } = await client.buildRequestRedemption({
+  assetId:           'vault-gold-1',
+  accountCommitment,
+  warehouseId:       'op-west',
+  skuClassId:        'XAU-9999',
+  siloAmount:        50_0000,   // silo units to burn
+  requestedQuantity: 50,        // troy oz expected
+  destinationRef:    'dock-3'
+})
+await client.submitRequestRedemption(txJson)
+```
+
+**Operator — settle redemption**
+
+```js
+await operatorClient.settleRedemption({
+  requestId,
+  operatorId:      'op-west',
+  warehouseId:     'wh-001',
+  fulfillmentRef:  'warehouse-release-99',
+  burnAmount:      50_0000,
+  settledQuantity: 50
+})
+```
+
+**Operator — apply demurrage**
+
+```js
+await operatorClient.applyDemurrage({
+  assetId:           'vault-gold-1',
+  accountCommitment,
+  policyId:          'policy-2026-q2',
+  amount:            125,
+  periodStart:       1770000000,
+  periodEnd:         1780000000,
+  reason:            'storage_fee_q2'
+})
+```
+
+Add anonymous holder governance by promoting to `shyshares-v1` — see [sharesClient](#sharesclient) below.
+
+---
+
+## contractsClient
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/contractsClient.js'
+// financingClient.js is an alias
+```
+
+`contractsClient` has no `operatorMode` flag — enforce operator access at the API layer. `shycontracts-v1` is a general anonymous smart contracts platform; `contractType` and `metadata` carry domain-specific semantics.
+
+**Setup (operator)**
+
+```js
+await client.registerAsset({ assetId: 'usd-contracts', name: 'Contract Settlement USD', decimals: 2 })
+const { accountCommitment } = await client.registerAccount({ walletAddress })
+await client.mint({ assetId: 'usd-contracts', accountCommitment, amount: 500000 })
+```
+
+**Read**
+
+```js
+await client.getAsset(assetId)
+await client.getSupply(assetId)                          // public
+await client.getBalance(assetId, accountCommitment)      // requires auth
+await client.getContract(contractId)
+await client.getContractExecution(executionId)
+```
+
+**Register a contract**
+
+Contracts start `active` by default. Pass `pendingCondition: true` to start in `pending_condition` — a subsequent `activateContract` call with evidence is then required before executions are accepted.
+
+```js
+const { txJson, contractId, contractHash } = await client.buildRegisterContract({
+  assetId:       'usd-contracts',
+  contractType:  'escrow',               // arbitrary — identifies the domain
+  parties: [
+    { role: 'buyer',  commitment: buyerCommitment,  seniority: 0 },
+    { role: 'seller', commitment: sellerCommitment, seniority: 1 }
+  ],
+  offchainTerms:    { description: 'Widget purchase Q2' },  // hashed into contractHash only
+  metadata:         { terms_url: 'ipfs://Qm...' },          // written to canonical state
+  pendingCondition: true,    // start pending; require activate before executions
+  expiryTimestamp:  0        // 0 = no expiry
+})
+await client.submitRegisterContract(txJson)
+```
+
+`contractId = H(contractHash:timestamp:nonce)` — derived client-side. `offchainTerms` is hashed into `contractHash` but not written to canonical state. `metadata` is written as-is.
+
+**Activate**
+
+Only required when `pendingCondition: true` was set at registration. Transition to `active` with an evidence string (any value — hashed on-chain):
+
+```js
+const { txJson, evidenceHash } = await client.buildActivateContract({
+  contractId,
+  evidence:      'seller-delivery-confirmed-ref-abc123',
+  evidenceType:  'delivery_confirmation',   // arbitrary
+  activatedAt:   Math.floor(Date.now() / 1000)
+})
+await client.submitActivateContract(txJson)
+```
+
+**Execute**
+
+```js
+const { txJson, executionId, nullifier } = await client.buildContractExecution({
+  contractId,
+  assetId:                'usd-contracts',
+  partyCommitment:        buyerCommitment,
+  counterpartyCommitment: sellerCommitment,
+  executionType:          'payment',         // arbitrary
+  sourceRef:              'invoice-2026-042', // idempotency key
+  amount:                 50000,
+  payload:                { milestone: 'delivery' }
+})
+await client.submitContractExecution(txJson)
+```
+
+`nullifier = H(partyCommitment:contractId:sourceRef)` — deterministic on `sourceRef`. Same `sourceRef` twice is rejected as duplicate. `executionId = H(transferNonce)` is the receipt.
+
+**Stake / balance transfers between parties**
+
+Use wireClient on the same API server when parties need to move balances outside an execution event:
+
+```js
+const wireClient = initializeFromShyConfig(wireShyconfig, { getAuthHeaders })
+await wireClient.wireSubmission({ scopingId: assetId, senderCommitment, recipientCommitment, amount })
+```
+
+---
+
+## sharesClient
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/sharesClient.js'
+// No operatorMode flag — sharesClient has no operator-gated methods
+// Pass deriveSealerKey if sealer.enabled: true in shyconfig
+```
+
+**Governance token setup**
+
+Token balances drive membership weight. Use a wireClient (separate `shywire-v1` shyconfig, same API server) to register member accounts and mint governance tokens before any ballot is valid:
+
+```js
+const wireClient = initializeFromShyConfig(wireShyconfig, { getAuthHeaders, operatorMode: true })
+const { accountCommitment } = await wireClient.registerAccount({ walletAddress })
+await wireClient.issueWire({ assetId: governanceTokenAssetId, accountCommitment, amount: 1000 })
+```
+
+**Read**
+
+```js
+await client.listOrganizations()
+await client.getOrganization(organizationId)
+await client.getMembershipSnapshot(accountCommitment)  // → { weight, eligibilityAssetId, ... }
+await client.listProposals({ status, proposalClass })
+await client.getProposal(proposalId)
+await client.getTally(proposalId)
+await client.listActions({ status })
+await client.getAction(actionId)
+```
+
+**Proposals**
+
+```js
+await client.createProposal({
+  class:     'parameter_change',
+  question:  'Increase fee to 50bps?',
+  options:   ['yes', 'no'],
+  startTime: Math.floor(Date.now() / 1000),
+  endTime:   Math.floor(Date.now() / 1000) + 86400 * 7
+})
+
+await client.closeProposal(proposalId)
+```
+
+**Weighted ballot**
+
+```js
+await client.submitWeightedBallot({
+  proposal_id:        'proposal-42',
+  choice:             'yes',
+  account_commitment: memberCommitment
+})
+```
+
+The ballot is weighted by the member's token balance at snapshot time. If `sealer.enabled: true`, `submitWeightedBallot` seals the payload with `deriveSealerKey` before posting.
+
+**Action queue**
+
+```js
+await client.dispatchAction(actionId, { adapter: 'shywire', adapterPayload: { amount, recipientCommitment } })
+```
+
+---
+
+## betsClient
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/betsClient.js'
+```
+
+```js
+await client.listEvents({ status, marketId })
+await client.getEvent(scopingId)
+await client.listOrderBook(scopingId)
+
+await client.placeOrder({ scopingId, side: 'back', outcome: 'candidate-a', stake: 500, odds: 2.1, accountCommitment })
+
+await client.getSettlement(scopingId)
+
+// Settlement wire surface
+const wire = client.getSettlementClient()
+await wire.registerAccount({ walletAddress })
+```
+
+---
+
+## lotsClient
+
+```js
+import { initializeFromShyConfig } from 'shyware/sdk/web/lotsClient.js'
+// Pass { operatorMode: true } for settlement methods
+```
+
+```js
+await client.listMarketplaceLots({ status, operatorId })
+await client.getMarketplaceLot(lotId)
+
+const account = await client.registerBidderAccount({ walletAddress })
+await client.getSettlementBalance(account.accountCommitment)
+
+await client.transferBidBond({ senderCommitment, recipientCommitment, amount })
+await client.settleAwardTransfer({ senderCommitment, recipientCommitment, amount })
+
+await client.createFundingIntent({ amount, destinationNetwork, destinationAddress })
+await client.createPayoutIntent({ amount, accountCommitment, payoutRail, payoutDestination })
+
+await client.requestLotRedemption({ assetId, accountCommitment, warehouseId, skuClassId, siloAmount, requestedQuantity, destinationRef })
+```
+
+---
+
+## Structural guarantee
+
+Count-match embodiments enforce `|L1(S)| = |L2(S)| = N` at period close with an HSM-signed dual Merkle root attestation. An operator cannot determine who submitted what from canonical state alone. Attribution requires the reconciling authority's off-chain linkage store, accessible only under lawful process. `TxTypeAuthorityRescind` is available for two-party threshold erasure when rescission keys are registered at scoping-period creation.

@@ -1,0 +1,56 @@
+# ── Stage 1: Build shyvoting binaries ────────────────────────────────────────
+# Build context must be the repo root (contains go.work + all modules).
+FROM golang:1.22-alpine AS builder
+RUN apk add --no-cache git
+
+WORKDIR /workspace
+
+# Copy the Go workspace manifest first — lets Docker cache the module layer.
+COPY go.work go.work.sum ./
+
+# Copy modules referenced by shyvoting (main SDK + analytics replace directive).
+COPY shyware/ ./shyware/
+COPY analytics/ ./analytics/
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o /shyvoting-abci \
+    ./shyware/shyvoting/cmd/shyvoting-abci/
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o /shyvoting-verify \
+    ./shyware/shyvoting/cmd/shyvoting-verify/
+
+# ── Stage 2: Build CometBFT ───────────────────────────────────────────────────
+FROM golang:1.22-alpine AS cometbft-builder
+RUN apk add --no-cache git
+RUN CGO_ENABLED=0 GOOS=linux go install \
+    github.com/cometbft/cometbft/cmd/cometbft@v0.38.5
+
+# ── Stage 3: Minimal runtime image ───────────────────────────────────────────
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates tzdata netcat-openbsd
+
+COPY --from=builder       /shyvoting-abci           /usr/local/bin/shyvoting-abci
+COPY --from=builder       /shyvoting-verify          /usr/local/bin/shyvoting-verify
+COPY --from=cometbft-builder /go/bin/cometbft        /usr/local/bin/cometbft
+COPY shyware/deploy/docker/validator-entrypoint.sh   /entrypoint.sh
+
+RUN chmod +x \
+    /entrypoint.sh \
+    /usr/local/bin/shyvoting-abci \
+    /usr/local/bin/shyvoting-verify \
+    /usr/local/bin/cometbft
+
+# /cometbft — CometBFT home (config.toml, genesis.json, node_key.json, priv_validator_key.json)
+# /data      — ABCI LevelDB state
+VOLUME ["/cometbft", "/data"]
+
+# 26656 — CometBFT P2P
+# 26657 — CometBFT RPC
+# 26658 — ABCI socket (internal only)
+# 26660 — Prometheus metrics
+EXPOSE 26656 26657 26658 26660
+
+ENTRYPOINT ["/entrypoint.sh"]

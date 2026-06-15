@@ -1,0 +1,114 @@
+---
+title: Prior-Art Combination Stress Test
+description: Why a nullifier or anonymous-voting reference plus a split-record governance reference does not reproduce the shyware voting apparatus by configuration alone
+---
+
+## Purpose
+
+This note models the most likely obviousness-style combination argument:
+
+- one anonymous voting / ZK / nullifier reference; plus
+- one ledger-governance / split-record / queue-oriented reference.
+
+The goal is not to say the combination is impossible in the abstract. The goal is
+to show that, in this codebase, the combination does **not** become the shyware
+voting protocol by changing a few config fields.
+
+The reference manifest used for this exercise is
+[`shyconfig.prior-art-combo.example.json`](/shyconfig.prior-art-combo.example.json).
+
+## What the current SDK/config layer can express
+
+The `shyconfig` manifest can express:
+
+- voting contract selection (`contract_version: "shyvoting-v1"`)
+- identity provider selection (`didit`, `identus`, `wallet`, `none`)
+- signing backend expectations
+- deployment posture (`recoverable` vs `coercion_resistant`)
+- receipt handling policy
+
+The manifest does **not** itself define:
+
+- the canonical two-list invariant
+- the count-match / one-to-one conservation invariant
+- the period-close attestation semantics
+- the read-only reconciling authority model
+- the queue-to-batch canonical materialization rule
+
+Those are implemented by the voting state machine and its surrounding protocol,
+not by the config file alone.
+
+## Boundary 1: governance config does not substitute for the voting protocol
+
+`shyshares` governance settings and execution adapters are a different contract
+family. The voting client requires:
+
+- `contract_version: "shyvoting-v1"`
+- voting flows
+- signing
+- receipt handling
+- deployment posture
+
+So a governance manifest with execution adapters is not a substitute for the
+voting protocol contract. It is a different embodiment.
+
+## Boundary 2: ZK nullifier mode is not a manifest toggle
+
+The ordinary voting client computes a base-tier `identity_hash` from the
+manifest-selected identity provider and the scoped participant input.
+
+The high-assurance ZK tier is separate:
+
+- it requires the ZK prover runtime
+- it requires `buildZKBallotEnvelope`
+- it requires proof generation and nullifier construction outside the ordinary
+  manifest-driven `buildBallot` path
+
+That means a nullifier reference cannot simply be "combined by config" with the
+split-record voting path. It requires a distinct proof-generation and witness
+handling path.
+
+## Boundary 3: if receipts are removed, recoverable reconcile disappears
+
+A no-receipt or write-only profile can preserve anonymous submission, but it
+does not preserve recoverable reconcile. Once `match_store: "none"` and
+`user_access: "never"` are selected, the recoverable path is gone.
+
+So a combination that tries to preserve pure nullifier anonymity by dropping the
+receipt layer does not reproduce the shyware recovery apparatus.
+
+## Boundary 4: if recovery is restored, the protected linkage tier returns
+
+If recoverability is restored with a managed receipt backend, the system
+recreates a separate authority structure:
+
+- canonical write power remains in the consensus path
+- reconciling authority remains read-only over the protected linkage tier
+- recovery is no longer "just split records"; it depends on the separate
+  linkage apparatus
+
+That is precisely why the reconcile path is claimed as a distinct architectural
+layer rather than a natural byproduct of anonymous voting or split-record
+storage.
+
+## Practical takeaway
+
+A prior-art-style combination can imitate pieces:
+
+- split records
+- anonymous submission
+- nullifier-based deduplication
+- governance metadata
+
+But in this repo it does not, by configuration alone, produce the full shyware
+apparatus consisting of:
+
+- canonical two-list non-materialization
+- paired count-constrained structure
+- attested tally/period-close commitments
+- optional recoverable reconcile through a read-only protected linkage tier
+
+That is the useful engineering lesson for prosecution:
+
+the combination can copy ingredients, but it still has to add the missing state
+machine and authority architecture to become the claimed system.
