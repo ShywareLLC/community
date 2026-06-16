@@ -438,7 +438,7 @@
             "hosted_dedicated",
             "self_hosted"
           ],
-          "description": "Commercial posture for the deployment. community = shared shyware-operated tenant environment; hosted_dedicated = tenant-dedicated chain or service still run by shyware or another operator; self_hosted = tenant runs its own infrastructure."
+          "description": "Canonical ledger posture. community = shared Shyware-operated ledger (operator supplies RA or uses Shyware-hosted RA). hosted_dedicated = Shyware-operated dedicated ledger for this tenant. self_hosted (BYOL) = operator runs their own ABCI node; must supply a separate reconcile_authority.operator that is not 'ledger_operator' for anonymity-to-operator to hold."
         },
         "ledger_tenancy": {
           "type": "string",
@@ -448,13 +448,26 @@
           ],
           "description": "Whether canonical ledger state is committed to a shared multi-tenant chain or a tenant-dedicated chain."
         },
-        "service_hosting": {
-          "type": "string",
-          "enum": [
-            "shyware_hosted",
-            "tenant_hosted"
-          ],
-          "description": "Who runs the operator-facing service layer such as APIs, consoles, dispatch endpoints, or reconcile services."
+        "reconcile_authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Who operates the reconciling authority (RA) — the off-chain linkage store (identity_hash → submission_id). MUST be a different legal and operational entity from the canonical ledger operator. If the same entity runs both the ledger and the RA, the three-party attribution chain collapses to two parties and anonymity-to-operator is eliminated. This is enforced structurally at the validation-layer key-set registration (Claim 56): no signing key held by the RA is recognized by the state machine as authorized to propose or commit canonical state transitions.",
+          "properties": {
+            "operator": {
+              "type": "string",
+              "enum": [
+                "operator",
+                "shyware",
+                "independent_third_party",
+                "ledger_operator"
+              ],
+              "description": "operator = the deployment operator (the Shyware customer) runs their own RA; valid only for community and hosted_dedicated tiers where Shyware is the ledger operator and the deployment operator is a different entity. shyware = Shyware hosts the RA; valid only for self_hosted (BYOL) tier where the deployment operator is the ledger operator and Shyware is a different entity. independent_third_party = a third party unaffiliated with both Shyware and the deployment operator; valid for any tier. ledger_operator = the entity running the canonical ledger also runs the RA; this collapses anonymity-to-operator and is structurally prohibited for voting deployments requiring anonymity-to-operator."
+            },
+            "endpoint": {
+              "type": "string",
+              "description": "Base URL for the RA's reconcile API. Must be under the control of the declared operator, not the ledger operator."
+            }
+          }
         },
         "reconcile_mode": {
           "type": "string",

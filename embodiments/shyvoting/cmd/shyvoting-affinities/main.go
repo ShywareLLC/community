@@ -12,11 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"gopkg.in/yaml.v3"
 
-	"github.com/populist/analytics/config"
-	"github.com/populist/analytics/indexer"
-	"github.com/populist/analytics/projector"
-	"github.com/populist/analytics/server"
-	"github.com/populist/analytics/subscriber"
+	"github.com/ShywareLLC/community/analytics/config"
+	"github.com/ShywareLLC/community/analytics/indexer"
+	"github.com/ShywareLLC/community/analytics/projector"
+	"github.com/ShywareLLC/community/analytics/server"
+	"github.com/ShywareLLC/community/analytics/subscriber"
 )
 
 func main() {

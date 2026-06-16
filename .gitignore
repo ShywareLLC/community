@@ -1,0 +1,12 @@
+.DS_Store
+*.log
+
+node_modules/
+dist/
+build/
+.gradle/
+.kotlin/
+.cache/
+
+__pycache__/
+*.py[cod]
