@@ -17,11 +17,11 @@ import (
 	"github.com/cometbft/cometbft/libs/log"
 
 	"github.com/ShywareLLC/community/api/server"
-	"github.com/ShywareLLC/community/services/attest"
-	"github.com/ShywareLLC/community/services/identity"
 	"github.com/ShywareLLC/community/domain/state"
 	"github.com/ShywareLLC/community/protocol/tx"
 	statetypes "github.com/ShywareLLC/community/protocol/types"
+	"github.com/ShywareLLC/community/services/attest"
+	"github.com/ShywareLLC/community/services/identity"
 )
 
 // ── in-process broadcaster ────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ func broadcastOKJSON() []byte {
 
 func newIntegrationServer(t *testing.T) (*server.Server, *state.State, ed25519.PrivateKey) {
 	t.Helper()
-	s, err := state.NewState(context.Background(), dbm.NewMemDB(), "", log.NewNopLogger())
+	s, err := state.NewState(context.Background(), dbm.NewMemDB(), "", nil, log.NewNopLogger())
 	if err != nil {
 		t.Fatalf("NewState: %v", err)
 	}
@@ -141,8 +141,9 @@ var testBeaconHash = func() string {
 	return hex.EncodeToString(h[:])
 }()
 
-// buildIdentusBallotTx constructs a signed BallotCast tx using the Identus path.
-func buildIdentusBallotTx(t *testing.T, pollID, nonce, subjectDID string,
+// buildIssuerBallotTx constructs a signed BallotCast tx using the current
+// generic IDV attestation path.
+func buildIssuerBallotTx(t *testing.T, pollID, nonce string,
 	choices []string, voterPriv, issuerPriv ed25519.PrivateKey) string {
 	t.Helper()
 	voterPub := voterPriv.Public().(ed25519.PublicKey)
@@ -152,22 +153,20 @@ func buildIdentusBallotTx(t *testing.T, pollID, nonce, subjectDID string,
 	voterSig := ed25519.Sign(voterPriv, deviceMsg)
 
 	h := sha256.New()
-	h.Write([]byte(subjectDID))
 	h.Write([]byte(voterPubHex))
 	h.Write([]byte(pollID))
-	credSig := ed25519.Sign(issuerPriv, h.Sum(nil))
+	idvSig := ed25519.Sign(issuerPriv, h.Sum(nil))
 
 	payload := tx.BallotCastData{
-		PollID:               pollID,
-		BallotNonce:          nonce,
-		BeaconBlockHash:      testBeaconHash,
-		BeaconBlockHeight:    testBeaconHeight,
-		Choices:              choices,
-		Timestamp:            time.Now().Unix(),
-		VoterPubKey:          voterPubHex,
-		VoterSig:             voterSig,
-		IdentusSubjectDID:    subjectDID,
-		IdentusCredentialSig: credSig,
+		PollID:            pollID,
+		BallotNonce:       nonce,
+		BeaconBlockHash:   testBeaconHash,
+		BeaconBlockHeight: testBeaconHeight,
+		Choices:           choices,
+		Timestamp:         time.Now().Unix(),
+		VoterPubKey:       voterPubHex,
+		VoterSig:          voterSig,
+		IdvAttestationSig: idvSig,
 	}
 	data, _ := json.Marshal(payload)
 	envelope := &tx.Tx{Type: tx.TxTypeBallotCast, Signature: []byte{1}, Data: data}
@@ -204,7 +203,7 @@ func TestSubmitBallotIntegration(t *testing.T) {
 	createPoll(t, b, pollID)
 
 	_, voterPriv, _ := ed25519.GenerateKey(nil)
-	txStr := buildIdentusBallotTx(t, pollID, testNonce("integ-1"), "did:test:v1",
+	txStr := buildIssuerBallotTx(t, pollID, testNonce("integ-1"),
 		[]string{"yes"}, voterPriv, issuerPriv)
 
 	resp := postJSON(t, ts.URL+"/ballots", map[string]string{"tx": txStr}, nil)
@@ -263,9 +262,9 @@ func TestDuplicateVoteRejected(t *testing.T) {
 	createPoll(t, b, pollID)
 
 	_, voterPriv, _ := ed25519.GenerateKey(nil)
-	txStr1 := buildIdentusBallotTx(t, pollID, testNonce("d1"), "did:test:vdup",
+	txStr1 := buildIssuerBallotTx(t, pollID, testNonce("d1"),
 		[]string{"yes"}, voterPriv, issuerPriv)
-	txStr2 := buildIdentusBallotTx(t, pollID, testNonce("d2"), "did:test:vdup",
+	txStr2 := buildIssuerBallotTx(t, pollID, testNonce("d2"),
 		[]string{"no"}, voterPriv, issuerPriv)
 
 	postJSON(t, ts.URL+"/ballots", map[string]string{"tx": txStr1}, nil)
@@ -295,7 +294,7 @@ func TestAttestationRequired(t *testing.T) {
 	srv.WithAttester(&nopServerAttester{})
 
 	_, voterPriv, _ := ed25519.GenerateKey(nil)
-	txStr := buildIdentusBallotTx(t, pollID, testNonce("attest-1"), "did:test:va",
+	txStr := buildIssuerBallotTx(t, pollID, testNonce("attest-1"),
 		[]string{"yes"}, voterPriv, issuerPriv)
 
 	// Without token — 401.

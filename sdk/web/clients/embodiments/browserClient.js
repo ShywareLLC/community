@@ -6,6 +6,7 @@
  * operator reconciliation.
  */
 
+import { warnFoldedAuthority } from '../shywareConfig.js';
 import { openPayload, sealPayload } from "../../protocol/sealer.js";
 
 export const BROWSER_MANIFEST_CONTRACT_VERSION = "shybrowser-v1";
@@ -187,6 +188,7 @@ export function createBrowserClient({
 }
 
 export function initializeFromShyConfig(shyconfig, options = {}) {
+  warnFoldedAuthority(shyconfig);
   assertBrowserManifest(shyconfig);
 
   const requiresAuth =

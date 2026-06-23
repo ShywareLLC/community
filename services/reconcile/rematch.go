@@ -84,11 +84,12 @@ type Store interface {
 	DeleteSubmission(ctx context.Context, pollID, identityHash string) error
 }
 
-// CRDBStore implements Store using CockroachDB as the off-chain linkage
-// backend. It is the production reconciling authority for recoverable-posture
-// deployments.
+// PostgresStore implements Store using any Postgres-compatible database as the
+// off-chain linkage backend (CockroachDB, pg, RDS, Aurora, Supabase, Neon, etc.).
+// It is the production reconciling authority for recoverable-posture deployments.
+// Pass any *sql.DB opened with a Postgres-compatible driver (pgx, lib/pq, etc.).
 //
-// Schema (run once against your CockroachDB cluster):
+// Schema (run once):
 //
 //	CREATE TABLE IF NOT EXISTS receipt_store (
 //	  poll_id       TEXT NOT NULL,
@@ -96,16 +97,16 @@ type Store interface {
 //	  ballot_id     TEXT NOT NULL,
 //	  PRIMARY KEY (poll_id, identity_hash)
 //	);
-type CRDBStore struct {
+type PostgresStore struct {
 	db *sql.DB
 }
 
-// NewCRDBStore creates a CRDBStore backed by db.
-func NewCRDBStore(db *sql.DB) *CRDBStore {
-	return &CRDBStore{db: db}
+// NewPostgresStore creates a PostgresStore backed by db.
+func NewPostgresStore(db *sql.DB) *PostgresStore {
+	return &PostgresStore{db: db}
 }
 
-func (s *CRDBStore) RecordSubmission(ctx context.Context, pollID, identityHash, submissionID string) error {
+func (s *PostgresStore) RecordSubmission(ctx context.Context, pollID, identityHash, submissionID string) error {
 	const q = `
 		INSERT INTO receipt_store (poll_id, identity_hash, ballot_id)
 		VALUES ($1, $2, $3)
@@ -116,7 +117,7 @@ func (s *CRDBStore) RecordSubmission(ctx context.Context, pollID, identityHash, 
 	return nil
 }
 
-func (s *CRDBStore) GetSubmissionID(ctx context.Context, pollID, identityHash string) (string, error) {
+func (s *PostgresStore) GetSubmissionID(ctx context.Context, pollID, identityHash string) (string, error) {
 	const q = `SELECT ballot_id FROM receipt_store WHERE poll_id = $1 AND identity_hash = $2`
 	var submissionID string
 	if err := s.db.QueryRowContext(ctx, q, pollID, identityHash).Scan(&submissionID); err != nil {
@@ -125,7 +126,7 @@ func (s *CRDBStore) GetSubmissionID(ctx context.Context, pollID, identityHash st
 	return submissionID, nil
 }
 
-func (s *CRDBStore) RevealBallotEvidence(ctx context.Context, pollID, identityHash string) (string, error) {
+func (s *PostgresStore) RevealBallotEvidence(ctx context.Context, pollID, identityHash string) (string, error) {
 	// RevealBallotEvidence returns the direction-free ballot_id only.
 	// Caller must verify dual co-authorization and commit a reveal-evidence
 	// event record to canonical state before returning to the requesting party.
@@ -137,7 +138,7 @@ func (s *CRDBStore) RevealBallotEvidence(ctx context.Context, pollID, identityHa
 	return ballotID, nil
 }
 
-func (s *CRDBStore) DeleteSubmission(ctx context.Context, pollID, identityHash string) error {
+func (s *PostgresStore) DeleteSubmission(ctx context.Context, pollID, identityHash string) error {
 	const q = `DELETE FROM receipt_store WHERE poll_id = $1 AND identity_hash = $2`
 	if _, err := s.db.ExecContext(ctx, q, pollID, identityHash); err != nil {
 		return fmt.Errorf("reconcile store delete poll=%s: %w", pollID, err)

@@ -17,7 +17,8 @@
 DROP MATERIALIZED VIEW IF EXISTS ballots_view CASCADE;
 
 -- List 1: anonymous vote directions
--- Sourced from "ballot_cast" events (no identity_hash attribute in this event type)
+-- Populated only from canonical List 1 state exports or trusted ingestion paths
+-- that carry no identity_hash field.
 CREATE TABLE IF NOT EXISTS vote_directions (
     ballot_id       TEXT        NOT NULL,
     poll_id         TEXT        NOT NULL,
@@ -32,7 +33,8 @@ CREATE INDEX IF NOT EXISTS idx_vote_directions_poll_id ON vote_directions(poll_i
 CREATE INDEX IF NOT EXISTS idx_vote_directions_height  ON vote_directions(included_height);
 
 -- List 2: voter participation — who voted, no choice
--- Sourced from "voter_registered" events (no choice attribute in this event type)
+-- Populated only from canonical List 2 state exports or trusted ingestion paths
+-- that carry no ballot_id or choice field.
 CREATE TABLE IF NOT EXISTS voter_registry (
     identity_hash   TEXT        NOT NULL,
     poll_id         TEXT        NOT NULL,
@@ -64,10 +66,10 @@ DROP MATERIALIZED VIEW IF EXISTS tallies_view CASCADE;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS tallies_view AS
 SELECT
-    attrs_poll_id.value         AS poll_id,
+    attrs_scoping_id.value      AS poll_id,
     attrs_total_votes.value::BIGINT AS total_votes,
-    attrs_vote_root.value       AS vote_merkle_root,
-    attrs_voter_root.value      AS voter_merkle_root,
+    attrs_l1_commitment.value   AS l1_commitment,
+    attrs_l2_commitment.value   AS l2_commitment,
     attrs_finalized_at.value::BIGINT AS finalized_at,
     tx.height                   AS closing_height,
     b.block_time                AS closed_at,
@@ -76,14 +78,14 @@ SELECT
 FROM tx_results tx
 JOIN blocks b ON tx.height = b.height
 JOIN events e ON e.tx_hash = tx.tx_hash
-JOIN attributes attrs_poll_id
-    ON attrs_poll_id.event_id = e.id AND attrs_poll_id.key = 'poll_id'
+JOIN attributes attrs_scoping_id
+    ON attrs_scoping_id.event_id = e.id AND attrs_scoping_id.key = 'scoping_id'
 LEFT JOIN attributes attrs_total_votes
     ON attrs_total_votes.event_id = e.id AND attrs_total_votes.key = 'total_votes'
-LEFT JOIN attributes attrs_vote_root
-    ON attrs_vote_root.event_id = e.id AND attrs_vote_root.key = 'vote_merkle_root'
-LEFT JOIN attributes attrs_voter_root
-    ON attrs_voter_root.event_id = e.id AND attrs_voter_root.key = 'voter_merkle_root'
+LEFT JOIN attributes attrs_l1_commitment
+    ON attrs_l1_commitment.event_id = e.id AND attrs_l1_commitment.key = 'l1_commitment'
+LEFT JOIN attributes attrs_l2_commitment
+    ON attrs_l2_commitment.event_id = e.id AND attrs_l2_commitment.key = 'l2_commitment'
 LEFT JOIN attributes attrs_finalized_at
     ON attrs_finalized_at.event_id = e.id AND attrs_finalized_at.key = 'finalized_at'
 WHERE e.type = 'poll_closed'
@@ -101,4 +103,32 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON MATERIALIZED VIEW tallies_view IS
-    'Poll tallies with both vote_merkle_root (List 1) and voter_merkle_root (List 2)';
+    'Poll tallies with separate l1_commitment and l2_commitment values';
+
+CREATE OR REPLACE VIEW polls_with_tallies AS
+SELECT
+    p.poll_id,
+    p.poll_hash,
+    p.question,
+    p.start_time,
+    p.end_time,
+    p.created_at,
+    p.created_height,
+    t.total_votes,
+    t.l1_commitment,
+    t.l2_commitment,
+    t.finalized_at,
+    t.closing_height,
+    t.closed_at,
+    CASE
+        WHEN t.poll_id IS NOT NULL THEN 'closed'
+        WHEN EXTRACT(EPOCH FROM NOW()) >= p.end_time THEN 'ended'
+        WHEN EXTRACT(EPOCH FROM NOW()) >= p.start_time THEN 'open'
+        ELSE 'pending'
+    END AS status
+FROM polls_view p
+LEFT JOIN tallies_view t ON p.poll_id = t.poll_id
+ORDER BY p.created_at DESC;
+
+COMMENT ON VIEW polls_with_tallies IS
+    'Polls joined only to aggregate tally commitments, never to identity-payload linkage';

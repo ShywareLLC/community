@@ -33,15 +33,15 @@ func init() {
 
 	srv := server.NewServer(mustEnv("COMETBFT_RPC"), serviceName)
 
-	if crdbURL := os.Getenv("CRDB_URL"); crdbURL != "" {
-		db, err := sql.Open("pgx", crdbURL)
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		db, err := sql.Open("pgx", dbURL)
 		if err != nil {
-			log.Fatalf("shyvoting-api-lambda: open CockroachDB: %v", err)
+			log.Fatalf("shyvoting-api-lambda: open database: %v", err)
 		}
 		if err := db.PingContext(ctx); err != nil {
-			log.Fatalf("shyvoting-api-lambda: ping CockroachDB: %v", err)
+			log.Fatalf("shyvoting-api-lambda: ping database: %v", err)
 		}
-		srv.WithReconcileStore(reconcile.NewCRDBStore(db))
+		srv.WithReconcileStore(reconcile.NewPostgresStore(db))
 	}
 
 	router := srv.Router()

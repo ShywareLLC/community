@@ -6,6 +6,7 @@
  * through this module so product surfaces cannot silently skip steps.
  */
 
+import { warnFoldedAuthority } from '../shywareConfig.js';
 import { createIdentityResolver } from "../../protocol/identity/identityClient.js";
 
 export const SUBMISSION_MANIFEST_CONTRACT_VERSION = "shyvoting-v1"; // For compatibility, but protocol is general
@@ -151,6 +152,15 @@ function normalizeRuntimeSignals(runtimeSignals = {}) {
       webSessionExpiry <= 0 ||
       webSessionExpiry > Date.now());
 
+  // serverPosture is set by the app after calling the public posture endpoint
+  // (GET /api/v1/posture), which resolves the participant's country from IP and
+  // returns the operator-configured posture for that country. Pass
+  // { serverPosture: 'write_only' } when the server reports a write-only country.
+  // 'write_only' escalates over the manifest default; 'recoverable' does not
+  // downgrade a manifest coercion_resistant default.
+  const serverPosture =
+    runtimeSignals.serverPosture === 'write_only' ? 'write_only' : null;
+
   return {
     playIntegrity: {
       available: Boolean(runtimeSignals.playIntegrity?.available),
@@ -165,6 +175,7 @@ function normalizeRuntimeSignals(runtimeSignals = {}) {
     hsm: {
       available: runtimeSignals.hsm?.available !== false
     },
+    serverPosture,
     webSession: {
       approved: webSessionApproved,
       expiresAt:
@@ -385,6 +396,14 @@ export function resolveEffectivePosture(manifest, runtimeSignals = {}) {
 
   let effectivePosture =
     defaultPosture === "coercion_resistant" ? "write_only" : "recoverable";
+
+  // Server-reported country posture: escalates to write_only when the operator
+  // has configured this country as write-only via the posture dashboard.
+  // Never downgrades — a manifest coercion_resistant default is unchanged.
+  if (normalized.serverPosture === "write_only") {
+    effectivePosture = "write_only";
+  }
+
   if (effectiveFallbackReasons.length > 0) {
     effectivePosture = "write_only";
   }
@@ -392,6 +411,7 @@ export function resolveEffectivePosture(manifest, runtimeSignals = {}) {
   return {
     configuredPosture: defaultPosture,
     effectivePosture,
+    serverPostureActive: normalized.serverPosture === "write_only",
     fallbackActive: effectiveFallbackReasons.length > 0,
     fallbackReasons: effectiveFallbackReasons,
     runtimeSignals: normalized,
@@ -718,7 +738,10 @@ export function createVotingClient({
       });
       const posture = resolveEffectivePosture(manifest, runtimeSignals);
       if (posture.writeOnly) {
-        return { submissionId: envelope.submissionId, writeOnly: true };
+        // Return nothing identifying — device state must be indistinguishable
+        // from a device that never submitted (Claim 47). Recovery goes through
+        // biometric re-derivation via the RA, not device-stored identifiers.
+        return { writeOnly: true };
       }
       return envelope;
     },
@@ -746,7 +769,7 @@ export function createVotingClient({
       await post("/submissions", { tx: envelope.txJson });
       const posture = resolveEffectivePosture(manifest, runtimeSignals);
       if (posture.writeOnly) {
-        return { submissionId: envelope.submissionId, writeOnly: true };
+        return { writeOnly: true };
       }
       return envelope;
     },
@@ -817,6 +840,7 @@ export function createVotingClient({
 }
 
 export function initializeFromShyConfig(shyconfig, options = {}) {
+  warnFoldedAuthority(shyconfig);
   assertVotingManifest(shyconfig);
 
   if (

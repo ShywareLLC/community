@@ -95,13 +95,13 @@ func (s *Server) submitBallot(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"queued":      true,
-		"scoping_id":     data.PollID,
+		"scoping_id":  data.PollID,
 		"queue_count": count,
 	})
 }
 
 func (s *Server) flushPoll(w http.ResponseWriter, r *http.Request) {
-	pollID := mux.Vars(r)["scoping_id"]
+	pollID := mux.Vars(r)["poll_id"]
 	batch := s.dequeue(pollID)
 	if len(batch) == 0 {
 		writeError(w, http.StatusNotFound, "no queued relay submissions for poll")
@@ -140,19 +140,19 @@ func (s *Server) flushPoll(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"relayed":          true,
-		"scoping_id":          pollID,
+		"scoping_id":       pollID,
 		"submission_count": len(batch),
 		"result":           json.RawMessage(result),
 	})
 }
 
 func (s *Server) getQueueCount(w http.ResponseWriter, r *http.Request) {
-	pollID := mux.Vars(r)["scoping_id"]
+	pollID := mux.Vars(r)["poll_id"]
 	s.mu.Lock()
 	count := len(s.queue[pollID])
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"scoping_id":     pollID,
+		"scoping_id":  pollID,
 		"queue_count": count,
 	})
 }

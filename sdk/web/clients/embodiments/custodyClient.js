@@ -8,6 +8,7 @@
  * demurrage all flow through this module.
  */
 
+import { warnFoldedAuthority } from '../shywareConfig.js';
 import { createIdentityResolver } from "../../protocol/identity/identityClient.js";
 import { createWalletProofBase64 } from "../../protocol/walletProof.js";
 import {
@@ -682,6 +683,7 @@ export function createCustodyClient({
 }
 
 export function initializeFromShyConfig(shyconfig, options = {}) {
+  warnFoldedAuthority(shyconfig);
   applyStoreAnonLayerDefaults(shyconfig);
   assertCustodyManifest(shyconfig);
 

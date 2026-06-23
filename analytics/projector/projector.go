@@ -43,12 +43,15 @@ func (p *Projector) ProcessBlock(ctx context.Context, block *types.Block) error 
 		}
 	}
 
-	if _, err := tx.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY polls_view"); err != nil {
-		fmt.Printf("⚠️  Failed to refresh polls_view: %v\n", err)
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	if _, err := p.db.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY polls_view"); err != nil {
+		fmt.Printf("failed to refresh polls_view: %v\n", err)
+	}
+	if _, err := p.db.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY tallies_view"); err != nil {
+		fmt.Printf("failed to refresh tallies_view: %v\n", err)
 	}
 	return nil
 }

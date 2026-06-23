@@ -3,7 +3,7 @@
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS polls_view AS
 SELECT
-    attrs_poll_id.value AS poll_id,
+    attrs_scoping_id.value AS poll_id,
     attrs_poll_hash.value AS poll_hash,
     attrs_question.value AS question,
     attrs_start_time.value::BIGINT AS start_time,
@@ -15,7 +15,7 @@ SELECT
 FROM tx_results tx
 JOIN blocks b ON tx.height = b.height
 JOIN events e ON e.tx_hash = tx.tx_hash
-JOIN attributes attrs_poll_id ON attrs_poll_id.event_id = e.id AND attrs_poll_id.key = 'poll_id'
+JOIN attributes attrs_scoping_id ON attrs_scoping_id.event_id = e.id AND attrs_scoping_id.key = 'scoping_id'
 LEFT JOIN attributes attrs_poll_hash ON attrs_poll_hash.event_id = e.id AND attrs_poll_hash.key = 'poll_hash'
 LEFT JOIN attributes attrs_question ON attrs_question.event_id = e.id AND attrs_question.key = 'question'
 LEFT JOIN attributes attrs_start_time ON attrs_start_time.event_id = e.id AND attrs_start_time.key = 'start_time'

@@ -78,7 +78,7 @@ func getTestZKArtifacts(t *testing.T) (*zkp.Prover, *zkp.Verifier) {
 func newZKTestState(t *testing.T) (*State, ed25519.PrivateKey, ed25519.PublicKey) {
 	t.Helper()
 
-	s, err := NewState(context.Background(), dbm.NewMemDB(), "", log.NewNopLogger())
+	s, err := NewState(context.Background(), dbm.NewMemDB(), "", nil, log.NewNopLogger())
 	if err != nil {
 		t.Fatalf("NewState: %v", err)
 	}

@@ -29,8 +29,8 @@ import (
 
 	"github.com/ShywareLLC/community/api/rpc"
 	"github.com/ShywareLLC/community/protocol/config"
-	"github.com/ShywareLLC/community/services/reconcile"
 	"github.com/ShywareLLC/community/protocol/tx"
+	"github.com/ShywareLLC/community/services/reconcile"
 )
 
 type Server struct {
@@ -126,7 +126,6 @@ func (s *Server) Router() http.Handler {
 	r.HandleFunc("/ballots", s.submitBallot).Methods("POST")
 	r.HandleFunc("/ballots/update", s.updateBallot).Methods("POST")
 
-
 	return otelhttp.NewHandler(r, s.serviceName,
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			if route := mux.CurrentRoute(r); route != nil {
@@ -158,7 +157,7 @@ func (s *Server) listPolls(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getPoll(w http.ResponseWriter, r *http.Request) {
-	pollID := mux.Vars(r)["scoping_id"]
+	pollID := mux.Vars(r)["poll_id"]
 	trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("poll.id", pollID))
 	data, err := s.rpc.ABCIQuery("/poll/" + pollID)
 	if err != nil {
@@ -169,7 +168,7 @@ func (s *Server) getPoll(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTally(w http.ResponseWriter, r *http.Request) {
-	pollID := mux.Vars(r)["scoping_id"]
+	pollID := mux.Vars(r)["poll_id"]
 	trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("poll.id", pollID))
 	data, err := s.rpc.ABCIQuery("/tally/" + pollID)
 	if err != nil {
@@ -180,7 +179,7 @@ func (s *Server) getTally(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getVotes(w http.ResponseWriter, r *http.Request) {
-	pollID := mux.Vars(r)["scoping_id"]
+	pollID := mux.Vars(r)["poll_id"]
 	data, err := s.rpc.ABCIQuery("/votes/" + pollID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -190,7 +189,7 @@ func (s *Server) getVotes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getVoterCount(w http.ResponseWriter, r *http.Request) {
-	pollID := mux.Vars(r)["scoping_id"]
+	pollID := mux.Vars(r)["poll_id"]
 	data, err := s.rpc.ABCIQuery("/voter_count/" + pollID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -200,7 +199,7 @@ func (s *Server) getVoterCount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getConfirmedCount(w http.ResponseWriter, r *http.Request) {
-	pollID := mux.Vars(r)["scoping_id"]
+	pollID := mux.Vars(r)["poll_id"]
 	data, err := s.rpc.ABCIQuery("/confirms/" + pollID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -325,7 +324,7 @@ func (s *Server) submitBallot(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{
 		"queued":        true,
-		"scoping_id":       data.PollID,
+		"scoping_id":    data.PollID,
 		"submission_id": ballotID,
 	}
 	if writeOnlyActive {
@@ -472,7 +471,7 @@ func (s *Server) confirmReceipt(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) flushQueuedBallots(w http.ResponseWriter, r *http.Request) {
-	pollID := mux.Vars(r)["scoping_id"]
+	pollID := mux.Vars(r)["poll_id"]
 
 	batch, batchID := s.dequeueBallotsForFlush(pollID)
 	if len(batch) == 0 {
@@ -530,7 +529,7 @@ func (s *Server) flushQueuedBallots(w http.ResponseWriter, r *http.Request) {
 
 	writeJSONBody(w, http.StatusOK, map[string]any{
 		"flushed":          true,
-		"scoping_id":          pollID,
+		"scoping_id":       pollID,
 		"batch_id":         batchID,
 		"submission_count": len(batch),
 		"result":           json.RawMessage(result),
@@ -589,9 +588,6 @@ func (s *Server) deriveBallotIdentity(data tx.BallotCastData) (string, string, e
 	switch {
 	case data.ZKNullifier != "":
 		return ballotID, data.ZKNullifier, nil
-	case data.IdentusSubjectDID != "":
-		raw := sha256.Sum256([]byte(data.IdentusSubjectDID + data.VoterPubKey + data.PollID))
-		return ballotID, hex.EncodeToString(raw[:]), nil
 	case data.VoterPubKey != "":
 		raw := sha256.Sum256([]byte(data.VoterPubKey + data.PollID))
 		return ballotID, hex.EncodeToString(raw[:]), nil

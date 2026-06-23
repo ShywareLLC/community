@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ShywareLLC/community/services/identity"
+	"github.com/ShywareLLC/community/services/signer"
 	"github.com/ShywareLLC/community/domain/state"
 	"github.com/ShywareLLC/community/services/telemetry"
 	"github.com/ShywareLLC/community/protocol/tx"
@@ -25,7 +26,21 @@ type Config struct {
 	DBName     string // LevelDB database name (e.g. "populist", "seda-haqq")
 	AppName    string // Human-readable name returned in Info() response
 	TracerName string // OpenTelemetry tracer name (e.g. "populist-abci")
-	KMSKeyID   string // AWS KMS key ID for tally signing (empty = SHA-256 stub)
+
+	// KMSKeyID is the AWS KMS key ID for tally signing (community ledger convenience field).
+	// Takes precedence only when Signer is nil. Leave both empty for SHA-256 stub (dev only).
+	KMSKeyID string
+
+	// Signer is the signing backend for period-close attestations.
+	// Set this directly for BYOL deployments that use a non-AWS signing backend
+	// (GCP Cloud KMS, HashiCorp Vault, CloudHSM, Azure Key Vault, etc.).
+	// If nil and KMSKeyID is set, an AwsKmsSigner is constructed automatically.
+	// If both are nil/empty, attestation falls back to SHA-256 stub (degraded — dev only).
+	//
+	// Implement services/signer.Signer:
+	//   Sign(ctx, payload []byte) ([]byte, error)
+	//   PublicKeyDER() []byte
+	Signer signer.Signer
 
 	// Verifier is the IDV attestation verifier for this deployment.
 	// Required — startup fails if nil. Build the appropriate implementation
@@ -61,7 +76,7 @@ func New(ctx context.Context, cfg Config, logger log.Logger) (*App, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	st, err := state.NewState(ctx, db, cfg.KMSKeyID, logger)
+	st, err := state.NewState(ctx, db, cfg.KMSKeyID, cfg.Signer, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize state: %w", err)
 	}

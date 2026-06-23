@@ -54,10 +54,17 @@ type AttestationConfig struct {
 	RollingThreshold int    `json:"rolling_threshold"` // default 100 when mode=rolling
 }
 
+type reconcileAuthorityBlock struct {
+	Operator string `json:"operator"`
+	Endpoint string `json:"endpoint"`
+}
+
 type deploymentBlock struct {
-	DefaultPosture   string            `json:"default_posture"`
-	Attestation      AttestationConfig `json:"attestation"`
-	RuntimeFallbacks RuntimeFallbacks  `json:"runtime_fallbacks"`
+	DefaultPosture     string                   `json:"default_posture"`
+	DeploymentTier     string                   `json:"deployment_tier"`
+	ReconcileAuthority *reconcileAuthorityBlock `json:"reconcile_authority"`
+	Attestation        AttestationConfig        `json:"attestation"`
+	RuntimeFallbacks   RuntimeFallbacks         `json:"runtime_fallbacks"`
 }
 
 // RuntimeFallbacks declares which runtime trust-signal failures trigger a
@@ -140,6 +147,55 @@ func ValidateManifest(data []byte) error {
 		validModes := map[string]bool{"rolling": true, "period_close": true, "none": true}
 		if !validModes[mode] {
 			return fmt.Errorf("shyconfig: unsupported deployment.attestation.mode %q (must be rolling, period_close, or none)", mode)
+		}
+	}
+
+	// Validation-layer key-set registration: enforce operator-separation (Claim 56).
+	//
+	// The RA signing key is registered at initialization. If the same entity
+	// operates both the canonical ledger and the RA, the three-party attribution
+	// chain collapses and anonymity-to-operator is eliminated in every embodiment.
+	// This check is domain-agnostic: shyvoting, shywire, shycustody, shycontracts,
+	// and shyshares are all subject to the same structural prohibition.
+	if ra := m.Deployment.ReconcileAuthority; ra != nil {
+		tier := m.Deployment.DeploymentTier
+
+		// "ledger_operator" is never a valid RA operator — it names the authority
+		// collapse explicitly and is rejected unconditionally.
+		if ra.Operator == "ledger_operator" {
+			return fmt.Errorf(
+				"shyconfig: reconcile_authority.operator \"ledger_operator\" is not permitted. " +
+					"The reconciling authority must be operated by a different entity than the canonical ledger operator. " +
+					"When the same entity controls both, participant submissions can be linked to identities, " +
+					"removing the anonymity guarantee. " +
+					"Set reconcile_authority.operator to operator, shyware, or independent_third_party.",
+			)
+		}
+
+		// "operator" (deployment operator runs the RA) is only valid when Shyware
+		// is the ledger operator — i.e., community or hosted_dedicated tier.
+		// In self_hosted (BYOL) the deployment operator IS the ledger operator,
+		// so "operator" as RA folds the same authority.
+		if ra.Operator == "operator" && tier == "self_hosted" {
+			return fmt.Errorf(
+				"shyconfig: reconcile_authority.operator \"operator\" is not valid for deployment_tier \"self_hosted\". " +
+					"In a self-hosted deployment you operate the canonical ledger, so you cannot also operate the reconciling authority — " +
+					"that would give a single entity the ability to link participant submissions to identities. " +
+					"Use reconcile_authority.operator: shyware or independent_third_party.",
+			)
+		}
+
+		// "shyware" as RA is only valid when the deployment operator is the ledger
+		// operator — i.e., self_hosted (BYOL). In community or hosted_dedicated,
+		// Shyware is already the ledger operator, so Shyware as RA folds authority.
+		if ra.Operator == "shyware" && (tier == "community" || tier == "hosted_dedicated") {
+			return fmt.Errorf(
+				"shyconfig: reconcile_authority.operator \"shyware\" is not valid for deployment_tier %q. "+
+					"Shyware operates the canonical ledger in this tier, so Shyware cannot also operate the reconciling authority — "+
+					"that would give a single entity the ability to link participant submissions to identities. "+
+					"Use reconcile_authority.operator: operator or independent_third_party.",
+				tier,
+			)
 		}
 	}
 

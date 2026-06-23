@@ -7,6 +7,7 @@
  * account registration, issuance, anonymous transfer, redemption, and lookup.
  */
 
+import { warnFoldedAuthority } from '../shywareConfig.js';
 import { createIdentityResolver } from "../../protocol/identity/identityClient.js";
 import { createWalletProofBase64 } from "../../protocol/walletProof.js";
 
@@ -526,6 +527,7 @@ export function createWireClient({
 }
 
 export function initializeFromShyConfig(shyconfig, options = {}) {
+  warnFoldedAuthority(shyconfig);
   assertWireManifest(shyconfig);
 
   if (

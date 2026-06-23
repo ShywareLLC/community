@@ -134,7 +134,7 @@ func ParseBlock(blockData, resultsData []byte) (*Block, error) {
 					Index: attr.Index,
 				})
 
-				if ev.Type == "poll_created" || ev.Type == "ballot_cast" || ev.Type == "poll_closed" {
+				if ev.Type == "poll_created" || ev.Type == "submission_accepted" || ev.Type == "poll_closed" || ev.Type == "confirmation_processed" {
 					txResult.TxType = ev.Type
 				}
 			}

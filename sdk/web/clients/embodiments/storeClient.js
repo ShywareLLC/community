@@ -13,6 +13,7 @@
  * before the tx is broadcast. The ABCI layer stores ciphertext verbatim in List 1 and never
  * has access to plaintext. Local sealing (sealSecret / openSecret) uses shywareSealer.js.
  */
+import { warnFoldedAuthority } from '../shywareConfig.js';
 import { sealPayload, openPayload } from "../../protocol/sealer.js";
 import {
   applyStoreAnonLayerDefaults,
@@ -442,7 +443,7 @@ export function createStoreClient({
       return { result, submissionId, submissionNonce };
     },
 
-    // ---- closeBucket — operator-initiated snapshot + HSM attestation ----
+    // ---- closeBucket — operator-initiated snapshot + KMS period-close attestation ----
 
     async closeBucket({ scopingId, closingHeight }) {
       return broadcastTx(StoreTxTypeBucketClose, {
@@ -476,6 +477,7 @@ export function createStoreClient({
 }
 
 export function initializeFromShyConfig(shyconfig, options = {}) {
+  warnFoldedAuthority(shyconfig);
   applyStoreAnonLayerDefaults(shyconfig);
   assertStoreManifest(shyconfig);
 

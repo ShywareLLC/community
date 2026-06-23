@@ -39,9 +39,9 @@ import (
 	abcitypes "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/libs/log"
 
-	"github.com/ShywareLLC/community/services/identity"
 	"github.com/ShywareLLC/community/protocol/submission"
 	"github.com/ShywareLLC/community/protocol/tx"
+	"github.com/ShywareLLC/community/services/identity"
 )
 
 // BucketRecord holds shystore-specific metadata for a storage bucket period.
@@ -674,27 +674,20 @@ func (s *StoreState) executeStoreAdverseAction(t *tx.Tx) ([]abcitypes.Event, err
 // ---- Identity verification helpers ----
 
 // verifyAndIdentifyStore derives the identity_hash for a SecretStore.
-// identity_hash = sha256(sender_pub_key || bucket_id)  [Didit]
-//
-//	or sha256(identus_subject_did || sender_pub_key || bucket_id)  [Identus]
+// identity_hash = sha256(sender_pub_key || bucket_id)
 func verifyAndIdentifyStore(v identity.IdentityVerifier, d *tx.SecretStoreData) (string, error) {
 	cast := &tx.BallotCastData{
-		PollID:               d.BucketID,
-		BallotNonce:          d.SecretNonce,
-		VoterPubKey:          d.SenderPubKey,
-		VoterSig:             d.SenderSig,
-		DiditDeviceSig:       d.DiditDeviceSig,
-		IdentusSubjectDID:    d.IdentusSubjectDID,
-		IdentusCredentialSig: d.IdentusCredentialSig,
+		PollID:            d.BucketID,
+		BallotNonce:       d.SecretNonce,
+		VoterPubKey:       d.SenderPubKey,
+		VoterSig:          d.SenderSig,
+		IdvAttestationSig: d.IdvAttestationSig,
 	}
 	return v.VerifyAndIdentify(cast)
 }
 
 func verifyAndIdentifyStoreReveal(v identity.IdentityVerifier, d *tx.SecretRevealData) (string, error) {
 	h := sha256.New()
-	if d.IdentusSubjectDID != "" {
-		h.Write([]byte(d.IdentusSubjectDID))
-	}
 	h.Write([]byte(d.SenderPubKey))
 	h.Write([]byte(d.BucketID))
 	return hex.EncodeToString(h.Sum(nil)), nil
@@ -702,13 +695,11 @@ func verifyAndIdentifyStoreReveal(v identity.IdentityVerifier, d *tx.SecretRevea
 
 func verifyAndIdentifyStoreRotate(v identity.IdentityVerifier, d *tx.SecretRotateData) (string, error) {
 	update := &tx.BallotUpdateData{
-		PollID:               d.BucketID,
-		NewBallotNonce:       d.NewSecretNonce,
-		VoterPubKey:          d.SenderPubKey,
-		VoterSig:             d.SenderSig,
-		DiditDeviceSig:       d.DiditDeviceSig,
-		IdentusSubjectDID:    d.IdentusSubjectDID,
-		IdentusCredentialSig: d.IdentusCredentialSig,
+		PollID:            d.BucketID,
+		NewBallotNonce:    d.NewSecretNonce,
+		VoterPubKey:       d.SenderPubKey,
+		VoterSig:          d.SenderSig,
+		IdvAttestationSig: d.IdvAttestationSig,
 	}
 	return v.VerifyAndIdentifyUpdate(update)
 }

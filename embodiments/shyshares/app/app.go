@@ -39,6 +39,7 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 
 	"github.com/ShywareLLC/community/services/identity"
+	"github.com/ShywareLLC/community/services/signer"
 	votingstate "github.com/ShywareLLC/community/domain/state"
 	votingtx "github.com/ShywareLLC/community/protocol/tx"
 
@@ -54,9 +55,10 @@ type Config struct {
 	AppName string
 
 	// Voting sub-state configuration.
-	VotingDBPath   string                 // directory for voting LevelDB files
-	VotingDBName   string                 // voting database name (e.g. "dao-voting")
-	VotingKMSKeyID string                 // AWS KMS key for tally attestation (empty = SHA-256 stub)
+	VotingDBPath   string                    // directory for voting LevelDB files
+	VotingDBName   string                    // voting database name (e.g. "dao-voting")
+	VotingKMSKeyID string                    // AWS KMS key for tally attestation (empty = SHA-256 stub)
+	VotingSigner   signer.Signer             // BYOL signer; takes precedence over VotingKMSKeyID when set
 	Verifier       identity.IdentityVerifier // IDV verifier — WalletVerifier for DAO governance
 
 	// Token sub-state configuration.
@@ -107,7 +109,7 @@ func New(ctx context.Context, cfg Config, logger log.Logger) (*App, error) {
 		return nil, fmt.Errorf("open voting db: %w", err)
 	}
 
-	vs, err := votingstate.NewState(ctx, vDB, cfg.VotingKMSKeyID, logger)
+	vs, err := votingstate.NewState(ctx, vDB, cfg.VotingKMSKeyID, cfg.VotingSigner, logger)
 	if err != nil {
 		return nil, fmt.Errorf("init voting state: %w", err)
 	}

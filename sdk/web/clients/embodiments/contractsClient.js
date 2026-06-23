@@ -5,6 +5,7 @@
  * off-chain terms binding, and optional shywire value transfer rail.
  */
 
+import { warnFoldedAuthority } from '../shywareConfig.js';
 import { createIdentityResolver } from "../../protocol/identity/identityClient.js";
 import { createWalletProofBase64 } from "../../protocol/walletProof.js";
 
@@ -349,6 +350,7 @@ export function createContractsClient({
 }
 
 export function initializeFromShyConfig(shyconfig, options = {}) {
+  warnFoldedAuthority(shyconfig);
   assertContractsManifest(shyconfig);
   if (shyconfig.api?.requires_auth && typeof options.getAuthHeaders !== "function") {
     throw new Error("shyconfig requires authenticated contracts API access, but no auth header provider was supplied.");

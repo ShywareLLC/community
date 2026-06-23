@@ -34,9 +34,9 @@ import (
 	abcitypes "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/libs/log"
 
-	"github.com/ShywareLLC/community/services/identity"
 	"github.com/ShywareLLC/community/protocol/submission"
 	"github.com/ShywareLLC/community/protocol/tx"
+	"github.com/ShywareLLC/community/services/identity"
 )
 
 // MailboxRecord holds shychat-specific metadata for a mailbox period.
@@ -54,10 +54,10 @@ type MailboxRecord struct {
 // DeliveryRecord is the per-mailbox delivery closure record: a lightweight
 // domain-specific summary committed alongside TwoListBase.ClosureRecord.
 type DeliveryRecord struct {
-	MailboxID        string `json:"mailbox_id"`
-	TotalMessages    int64  `json:"total_messages"` // mirrors ClosureRecord.TotalSubmissions
-	SurfaceModel     string `json:"surface_model"`
-	FinalizedAt      int64  `json:"finalized_at"`
+	MailboxID     string `json:"mailbox_id"`
+	TotalMessages int64  `json:"total_messages"` // mirrors ClosureRecord.TotalSubmissions
+	SurfaceModel  string `json:"surface_model"`
+	FinalizedAt   int64  `json:"finalized_at"`
 }
 
 // ChatState is the shychat-v1 ABCI state machine.
@@ -67,7 +67,7 @@ type ChatState struct {
 	*submission.TwoListBase
 
 	// shychat-specific domain state.
-	mailboxes map[string]*MailboxRecord  // mailboxID → MailboxRecord
+	mailboxes  map[string]*MailboxRecord  // mailboxID → MailboxRecord
 	deliveries map[string]*DeliveryRecord // mailboxID → DeliveryRecord (set at close)
 }
 
@@ -495,43 +495,35 @@ func (s *ChatState) Query(path string, _ []byte, _ int64, _ bool) ([]byte, error
 // ---- Identity verification helpers ----
 
 // verifyAndIdentifyChat derives the identity_hash for a MessageDispatch.
-// Uses the same two embodiments as BallotCastData (Didit preferred, Identus alternative).
-// identity_hash = sha256(sender_pub_key || mailbox_id)  [Didit]
-//              or sha256(identus_subject_did || sender_pub_key || mailbox_id)  [Identus]
+// Uses the same current IDV attestation contract as BallotCastData.
+// identity_hash = sha256(sender_pub_key || mailbox_id)
 func verifyAndIdentifyChat(v identity.IdentityVerifier, d *tx.MessageDispatchData) (string, error) {
 	// Convert MessageDispatchData → BallotCastData shape for reuse of the verifier interface.
 	// The verifier expects VoterPubKey, PollID, and the attestation fields.
 	cast := &tx.BallotCastData{
-		PollID:               d.MailboxID,
-		BallotNonce:          d.MessageNonce,
-		VoterPubKey:          d.SenderPubKey,
-		VoterSig:             d.SenderSig,
-		DiditDeviceSig:       d.DiditDeviceSig,
-		IdentusSubjectDID:    d.IdentusSubjectDID,
-		IdentusCredentialSig: d.IdentusCredentialSig,
+		PollID:            d.MailboxID,
+		BallotNonce:       d.MessageNonce,
+		VoterPubKey:       d.SenderPubKey,
+		VoterSig:          d.SenderSig,
+		IdvAttestationSig: d.IdvAttestationSig,
 	}
 	return v.VerifyAndIdentify(cast)
 }
 
 func verifyAndIdentifyChatUpdate(v identity.IdentityVerifier, d *tx.MessageUpdateData) (string, error) {
 	update := &tx.BallotUpdateData{
-		PollID:               d.MailboxID,
-		NewBallotNonce:       d.NewMessageNonce,
-		VoterPubKey:          d.SenderPubKey,
-		VoterSig:             d.SenderSig,
-		DiditDeviceSig:       d.DiditDeviceSig,
-		IdentusSubjectDID:    d.IdentusSubjectDID,
-		IdentusCredentialSig: d.IdentusCredentialSig,
+		PollID:            d.MailboxID,
+		NewBallotNonce:    d.NewMessageNonce,
+		VoterPubKey:       d.SenderPubKey,
+		VoterSig:          d.SenderSig,
+		IdvAttestationSig: d.IdvAttestationSig,
 	}
 	return v.VerifyAndIdentifyUpdate(update)
 }
 
 func verifyAndIdentifyChatWithdraw(v identity.IdentityVerifier, d *tx.MessageWithdrawData) (string, error) {
-	// Withdraw reuses the Didit/Identus attestation path; treat MailboxID as the period scope.
+	// Withdraw reuses the current IDV attestation path; treat MailboxID as the period scope.
 	h := sha256.New()
-	if d.IdentusSubjectDID != "" {
-		h.Write([]byte(d.IdentusSubjectDID))
-	}
 	h.Write([]byte(d.SenderPubKey))
 	h.Write([]byte(d.MailboxID))
 	return hex.EncodeToString(h.Sum(nil)), nil

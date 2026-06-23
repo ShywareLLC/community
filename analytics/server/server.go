@@ -11,6 +11,8 @@
 //	GET  /polls/{poll_id}/tally
 //	GET  /polls/{poll_id}/votes
 //	GET  /polls/{poll_id}/voters
+//	GET  /polls/{poll_id}/assurances
+//	POST /polls/{poll_id}/contact-events — identity-side lifecycle events only
 //	POST /consent                  — opt in/out of solicitations marketplace
 //	GET  /solicitations            — active marketplace listings (opted-in only)
 package server
@@ -45,7 +47,8 @@ func New(db *pgxpool.Pool) *Server {
 func (s *Server) Handler() http.Handler { return s.mux }
 
 // pollsRouter dispatches /polls/{id}, /polls/{id}/tally, /polls/{id}/votes,
-// /polls/{id}/voters.
+// /polls/{id}/voters, /polls/{id}/assurances, and
+// /polls/{id}/contact-events.
 func (s *Server) pollsRouter(w http.ResponseWriter, r *http.Request) {
 	// strip leading /polls/
 	rest := strings.TrimPrefix(r.URL.Path, "/polls/")
@@ -68,6 +71,10 @@ func (s *Server) pollsRouter(w http.ResponseWriter, r *http.Request) {
 		s.getVotes(w, r, pollID)
 	case "voters":
 		s.getVoters(w, r, pollID)
+	case "assurances":
+		s.getAssurances(w, r, pollID)
+	case "contact-events":
+		s.contactEvent(w, r, pollID)
 	default:
 		http.NotFound(w, r)
 	}
@@ -82,8 +89,22 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 func (s *Server) polls(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rows, err := s.db.Query(ctx, `
-		SELECT poll_id, poll_hash, question, start_time, end_time, status, created_at, created_height
-		FROM polls_view
+		SELECT
+			p.poll_id,
+			p.poll_hash,
+			p.question,
+			p.start_time,
+			p.end_time,
+			CASE
+				WHEN t.poll_id IS NOT NULL THEN 'closed'
+				WHEN EXTRACT(EPOCH FROM NOW()) >= p.end_time THEN 'ended'
+				WHEN EXTRACT(EPOCH FROM NOW()) >= p.start_time THEN 'open'
+				ELSE 'pending'
+			END AS status,
+			p.created_at,
+			p.created_height
+		FROM polls_view p
+		LEFT JOIN tallies_view t ON p.poll_id = t.poll_id
 		ORDER BY created_at DESC
 		LIMIT 100
 	`)
@@ -133,8 +154,23 @@ func (s *Server) getPoll(w http.ResponseWriter, r *http.Request, pollID string) 
 	var p Poll
 	var createdAt time.Time
 	err := s.db.QueryRow(ctx, `
-		SELECT poll_id, poll_hash, question, start_time, end_time, status, created_at, created_height
-		FROM polls_view WHERE poll_id = $1
+		SELECT
+			p.poll_id,
+			p.poll_hash,
+			p.question,
+			p.start_time,
+			p.end_time,
+			CASE
+				WHEN t.poll_id IS NOT NULL THEN 'closed'
+				WHEN EXTRACT(EPOCH FROM NOW()) >= p.end_time THEN 'ended'
+				WHEN EXTRACT(EPOCH FROM NOW()) >= p.start_time THEN 'open'
+				ELSE 'pending'
+			END AS status,
+			p.created_at,
+			p.created_height
+		FROM polls_view p
+		LEFT JOIN tallies_view t ON p.poll_id = t.poll_id
+		WHERE p.poll_id = $1
 	`, pollID).Scan(&p.PollID, &p.PollHash, &p.Question, &p.StartTime, &p.EndTime,
 		&p.Status, &createdAt, &p.CreatedHeight)
 	if err != nil {
@@ -148,24 +184,73 @@ func (s *Server) getPoll(w http.ResponseWriter, r *http.Request, pollID string) 
 func (s *Server) getTally(w http.ResponseWriter, r *http.Request, pollID string) {
 	ctx := r.Context()
 	type Tally struct {
-		PollID         string `json:"poll_id"`
-		YesVotes       int64  `json:"yes_votes"`
-		NoVotes        int64  `json:"no_votes"`
-		TotalVotes     int64  `json:"total_votes"`
-		ConfirmedCount int64  `json:"confirmed_count"`
-		Status         string `json:"status"`
-		ClosedAt       string `json:"closed_at,omitempty"`
+		PollID         string           `json:"poll_id"`
+		Counts         map[string]int64 `json:"counts"`
+		TotalVotes     int64            `json:"total_votes"`
+		ConfirmedCount int64            `json:"confirmed_count"`
+		L1Commitment   string           `json:"l1_commitment"`
+		L2Commitment   string           `json:"l2_commitment"`
+		FinalizedAt    int64            `json:"finalized_at"`
+		ClosingHeight  int64            `json:"closing_height"`
+		Status         string           `json:"status"`
+		ClosedAt       string           `json:"closed_at,omitempty"`
 	}
 	var t Tally
 	var closedAt *time.Time
 	err := s.db.QueryRow(ctx, `
-		SELECT poll_id, yes_votes, no_votes, total_votes, confirmed_count, status, closed_at
+		SELECT poll_id, total_votes, l1_commitment, l2_commitment, finalized_at, closing_height, closed_at
 		FROM tallies_view WHERE poll_id = $1
-	`, pollID).Scan(&t.PollID, &t.YesVotes, &t.NoVotes, &t.TotalVotes, &t.ConfirmedCount, &t.Status, &closedAt)
+	`, pollID).Scan(
+		&t.PollID,
+		&t.TotalVotes,
+		&t.L1Commitment,
+		&t.L2Commitment,
+		&t.FinalizedAt,
+		&t.ClosingHeight,
+		&closedAt,
+	)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "tally not found")
 		return
 	}
+	countRows, err := s.db.Query(ctx, `
+		SELECT choice, COUNT(*) FROM vote_directions
+		WHERE poll_id = $1
+		GROUP BY choice
+		ORDER BY choice
+	`, pollID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer countRows.Close()
+	t.Counts = map[string]int64{}
+	for countRows.Next() {
+		var choice string
+		var count int64
+		if err := countRows.Scan(&choice, &count); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		t.Counts[choice] = count
+	}
+	if err := countRows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	err = s.db.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM events e
+		JOIN attributes a ON a.event_id = e.id AND a.key = 'scoping_id' AND a.value = $1
+		JOIN tx_results tx ON tx.tx_hash = e.tx_hash
+		WHERE e.type = 'confirmation_processed'
+			AND tx.success = true
+	`, pollID).Scan(&t.ConfirmedCount)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	t.Status = "closed"
 	if closedAt != nil {
 		t.ClosedAt = closedAt.Format(time.RFC3339)
 	}
@@ -216,6 +301,141 @@ func (s *Server) getVoters(w http.ResponseWriter, r *http.Request, pollID string
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"poll_id": pollID, "voter_count": count})
+}
+
+func (s *Server) getAssurances(w http.ResponseWriter, r *http.Request, pollID string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := r.Context()
+	var a struct {
+		VoteCount               int64
+		VoterCount              int64
+		CountMatch              bool
+		ConfirmedCount          int64
+		InvitedCount            int64
+		DeliveredCount          int64
+		OpenedCount             int64
+		AuthenticatedCount      int64
+		CredentialConsumedCount int64
+		SubmittedCount          int64
+		RemediatedCount         int64
+	}
+	err := s.db.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM vote_directions WHERE poll_id = $1) AS vote_count,
+			(SELECT COUNT(*) FROM voter_registry  WHERE poll_id = $1) AS voter_count,
+			(SELECT COUNT(*) FROM vote_directions WHERE poll_id = $1) =
+			(SELECT COUNT(*) FROM voter_registry  WHERE poll_id = $1) AS count_match,
+			(
+				SELECT COUNT(*)
+				FROM events e
+				JOIN attributes attr ON attr.event_id = e.id AND attr.key = 'scoping_id' AND attr.value = $1
+				JOIN tx_results tx ON tx.tx_hash = e.tx_hash
+				WHERE e.type = 'confirmation_processed'
+					AND tx.success = true
+			) AS confirmed_count,
+			COALESCE((SELECT invited_count FROM voter_contact_assurance WHERE poll_id = $1), 0) AS invited_count,
+			COALESCE((SELECT delivered_count FROM voter_contact_assurance WHERE poll_id = $1), 0) AS delivered_count,
+			COALESCE((SELECT opened_count FROM voter_contact_assurance WHERE poll_id = $1), 0) AS opened_count,
+			COALESCE((SELECT authenticated_count FROM voter_contact_assurance WHERE poll_id = $1), 0) AS authenticated_count,
+			COALESCE((SELECT credential_consumed_count FROM voter_contact_assurance WHERE poll_id = $1), 0) AS credential_consumed_count,
+			COALESCE((SELECT submitted_count FROM voter_contact_assurance WHERE poll_id = $1), 0) AS submitted_count,
+			COALESCE((SELECT remediated_count FROM voter_contact_assurance WHERE poll_id = $1), 0) AS remediated_count
+	`, pollID).Scan(
+		&a.VoteCount, &a.VoterCount, &a.CountMatch, &a.ConfirmedCount,
+		&a.InvitedCount, &a.DeliveredCount, &a.OpenedCount, &a.AuthenticatedCount,
+		&a.CredentialConsumedCount, &a.SubmittedCount, &a.RemediatedCount,
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"poll_id": pollID,
+		"canonical": map[string]any{
+			"accepted_payload_count": a.VoteCount,
+			"participant_count":      a.VoterCount,
+			"count_match":            a.CountMatch,
+			"confirmed_count":        a.ConfirmedCount,
+		},
+		"admin_lifecycle": map[string]int64{
+			"invited":             a.InvitedCount,
+			"delivered":           a.DeliveredCount,
+			"opened":              a.OpenedCount,
+			"authenticated":       a.AuthenticatedCount,
+			"credential_consumed": a.CredentialConsumedCount,
+			"submitted":           a.SubmittedCount,
+			"remediated":          a.RemediatedCount,
+		},
+		"privacy_boundary": map[string]any{
+			"identity_fields_exposed": false,
+			"ballot_fields_exposed":   false,
+			"join_fields_exposed":     false,
+		},
+	})
+}
+
+func (s *Server) contactEvent(w http.ResponseWriter, r *http.Request, pollID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := r.Context()
+	var req struct {
+		IdentityHash string         `json:"identity_hash"`
+		EventType    string         `json:"event_type"`
+		EventRef     *string        `json:"event_ref,omitempty"`
+		OccurredAt   *time.Time     `json:"occurred_at,omitempty"`
+		Metadata     map[string]any `json:"metadata,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.IdentityHash == "" {
+		writeError(w, http.StatusBadRequest, "identity_hash required")
+		return
+	}
+	if !validContactEventType(req.EventType) {
+		writeError(w, http.StatusBadRequest, "invalid event_type")
+		return
+	}
+	if containsForbiddenContactMetadata(req.Metadata) {
+		writeError(w, http.StatusBadRequest, "contact metadata must not contain ballot or payload linkage fields")
+		return
+	}
+	if req.Metadata == nil {
+		req.Metadata = map[string]any{}
+	}
+	metadataRaw, err := json.Marshal(req.Metadata)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid metadata")
+		return
+	}
+	var eventRef any
+	if req.EventRef != nil {
+		eventRef = *req.EventRef
+	}
+	occurredAt := time.Now().UTC()
+	if req.OccurredAt != nil {
+		occurredAt = req.OccurredAt.UTC()
+	}
+	_, err = s.db.Exec(ctx, `
+		INSERT INTO voter_contact_events
+			(poll_id, identity_hash, event_type, event_ref, occurred_at, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+	`, pollID, req.IdentityHash, req.EventType, eventRef, occurredAt, string(metadataRaw))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"poll_id":    pollID,
+		"event_type": req.EventType,
+		"recorded":   true,
+	})
 }
 
 // consent handles POST /consent — records an opt-in or opt-out.
@@ -340,4 +560,44 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func validContactEventType(eventType string) bool {
+	switch eventType {
+	case "invited", "delivered", "opened", "authenticated", "credential_consumed", "submitted", "remediated":
+		return true
+	default:
+		return false
+	}
+}
+
+func containsForbiddenContactMetadata(value any) bool {
+	forbidden := map[string]bool{
+		"ballot_id":          true,
+		"ballotId":           true,
+		"choice":             true,
+		"choices":            true,
+		"direction":          true,
+		"payload":            true,
+		"payload_commitment": true,
+		"payloadCommitment":  true,
+		"submission_id":      true,
+		"submissionId":       true,
+		"vote":               true,
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		for key, nested := range v {
+			if forbidden[key] || containsForbiddenContactMetadata(nested) {
+				return true
+			}
+		}
+	case []any:
+		for _, nested := range v {
+			if containsForbiddenContactMetadata(nested) {
+				return true
+			}
+		}
+	}
+	return false
 }

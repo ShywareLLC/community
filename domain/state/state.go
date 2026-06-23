@@ -73,10 +73,14 @@ type State struct {
 }
 
 // NewState creates a new state manager.
-// If kmsKeyID is non-empty, a KMS ECDSA signer (FIPS 140-2/3) is initialised;
-// leave it empty for local development (signing falls back to a SHA-256 stub).
-// KMS construction is centralised here so neither ABCI duplicates it.
-func NewState(ctx context.Context, db dbm.DB, kmsKeyID string, logger log.Logger) (*State, error) {
+//
+// Signer resolution order (first non-nil/non-empty wins):
+//  1. injectedSigner — caller-supplied signer.Signer (BYOL: GCP KMS, Vault, CloudHSM, etc.)
+//  2. kmsKeyID — convenience: constructs an AWS KMS signer automatically
+//  3. neither — SHA-256 stub (degraded, dev only)
+//
+// KMS construction is centralised here so no ABCI binary duplicates it.
+func NewState(ctx context.Context, db dbm.DB, kmsKeyID string, injectedSigner signer.Signer, logger log.Logger) (*State, error) {
 	s := &State{
 		db:               db,
 		logger:           logger,
@@ -95,17 +99,19 @@ func NewState(ctx context.Context, db dbm.DB, kmsKeyID string, logger log.Logger
 		beaconWindow:     make(map[int64]string),
 	}
 
-	if kmsKeyID != "" {
-		var sgn signer.Signer
+	switch {
+	case injectedSigner != nil:
+		s.signer = injectedSigner
+		logger.Info("BYOL signer injected", "type", fmt.Sprintf("%T", injectedSigner))
+	case kmsKeyID != "":
 		kmsSgn, err := kms.NewSigner(ctx, kmsKeyID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize KMS signer: %w", err)
 		}
-		sgn = kmsSgn
-		s.signer = sgn
-		logger.Info("KMS signer initialized (FIPS 140-2/3)", "key_id", kmsKeyID)
-	} else {
-		logger.Info("No KMS key ID provided — tally signing will use SHA-256 stub")
+		s.signer = kmsSgn
+		logger.Info("AWS KMS signer initialized (FIPS 140-3 L3)", "key_id", kmsKeyID)
+	default:
+		logger.Info("No signer configured — tally signing will use SHA-256 stub (dev only)")
 	}
 
 	if err := s.loadState(); err != nil {

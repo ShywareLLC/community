@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShywareLLC/community/services/identity"
 	"github.com/ShywareLLC/community/protocol/tx"
 	"github.com/ShywareLLC/community/protocol/types"
+	"github.com/ShywareLLC/community/services/identity"
 )
 
 // TestPriorArtComboSplitRecordsWithoutPairedInvariantCannotFinalize shows that a
@@ -75,7 +75,6 @@ func TestPriorArtComboRecoveryNeedsProtectedLinkage(t *testing.T) {
 	voterPubHex := hex.EncodeToString(voterPriv.Public().(ed25519.PublicKey))
 	voterSig := ed25519.Sign(voterPriv, []byte("update:"+nonceNew+":"+pollID))
 	h := sha256.New()
-	h.Write([]byte(subjectDID))
 	h.Write([]byte(voterPubHex))
 	h.Write([]byte(pollID))
 	credSig := ed25519.Sign(issuerPriv, h.Sum(nil))
@@ -83,17 +82,16 @@ func TestPriorArtComboRecoveryNeedsProtectedLinkage(t *testing.T) {
 	// This simulates a "split records + identity dedup" design with no receipt or
 	// reconciling tier: the voter can authenticate, but cannot supply old_ballot_id.
 	updateTx := buildTx(t, tx.TxTypeUpdateBallot, tx.BallotUpdateData{
-		PollID:               pollID,
-		OldBallotID:          "",
-		NewBallotNonce:       nonceNew,
-		NewChoices:           []string{"no"},
-		BeaconBlockHash:      testBeaconHash,
-		BeaconBlockHeight:    testBeaconHeight,
-		Timestamp:            time.Now().Unix(),
-		VoterPubKey:          voterPubHex,
-		VoterSig:             voterSig,
-		IdentusSubjectDID:    subjectDID,
-		IdentusCredentialSig: credSig,
+		PollID:            pollID,
+		OldBallotID:       "",
+		NewBallotNonce:    nonceNew,
+		NewChoices:        []string{"no"},
+		BeaconBlockHash:   testBeaconHash,
+		BeaconBlockHeight: testBeaconHeight,
+		Timestamp:         time.Now().Unix(),
+		VoterPubKey:       voterPubHex,
+		VoterSig:          voterSig,
+		IdvAttestationSig: credSig,
 	})
 
 	err = s.ValidateTx(updateTx)
@@ -136,23 +134,21 @@ func TestPriorArtComboWriteOnlyPosturePermitsDirectionChangeWithValidState(t *te
 	voterPubHex := hex.EncodeToString(voterPriv.Public().(ed25519.PublicKey))
 	voterSig := ed25519.Sign(voterPriv, []byte("update:"+nonceNewWO+":"+pollID))
 	h := sha256.New()
-	h.Write([]byte(subjectDID))
 	h.Write([]byte(voterPubHex))
 	h.Write([]byte(pollID))
 	credSig := ed25519.Sign(issuerPriv, h.Sum(nil))
 
 	updateTx := buildTx(t, tx.TxTypeUpdateBallot, tx.BallotUpdateData{
-		PollID:               pollID,
-		OldBallotID:          computeBallotIDWithBeacon(testBeaconHash, castNonceWO),
-		NewBallotNonce:       nonceNewWO,
-		NewChoices:           []string{"no"},
-		BeaconBlockHash:      testBeaconHash,
-		BeaconBlockHeight:    testBeaconHeight,
-		Timestamp:            time.Now().Unix(),
-		VoterPubKey:          voterPubHex,
-		VoterSig:             voterSig,
-		IdentusSubjectDID:    subjectDID,
-		IdentusCredentialSig: credSig,
+		PollID:            pollID,
+		OldBallotID:       computeBallotIDWithBeacon(testBeaconHash, castNonceWO),
+		NewBallotNonce:    nonceNewWO,
+		NewChoices:        []string{"no"},
+		BeaconBlockHash:   testBeaconHash,
+		BeaconBlockHeight: testBeaconHeight,
+		Timestamp:         time.Now().Unix(),
+		VoterPubKey:       voterPubHex,
+		VoterSig:          voterSig,
+		IdvAttestationSig: credSig,
 	})
 
 	if err = s.ValidateTx(updateTx); err != nil {

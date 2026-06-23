@@ -16,9 +16,9 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 	"github.com/cometbft/cometbft/libs/log"
 
-	"github.com/ShywareLLC/community/services/identity"
 	"github.com/ShywareLLC/community/protocol/tx"
 	"github.com/ShywareLLC/community/protocol/types"
+	"github.com/ShywareLLC/community/services/identity"
 	"github.com/ShywareLLC/community/verify"
 )
 
@@ -47,7 +47,7 @@ func seedBeacon(s *State) {
 
 func newTestState(t *testing.T) *State {
 	t.Helper()
-	s, err := NewState(context.Background(), dbm.NewMemDB(), "", log.NewNopLogger())
+	s, err := NewState(context.Background(), dbm.NewMemDB(), "", nil, log.NewNopLogger())
 	if err != nil {
 		t.Fatalf("NewState: %v", err)
 	}
@@ -129,22 +129,20 @@ func buildIdentusBallotEnvelope(
 	voterSig := ed25519.Sign(voterPriv, []byte(nonce+":"+pollID))
 
 	h := sha256.New()
-	h.Write([]byte(subjectDID))
 	h.Write([]byte(voterPubHex))
 	h.Write([]byte(pollID))
-	credSig := ed25519.Sign(issuerPriv, h.Sum(nil))
+	idvSig := ed25519.Sign(issuerPriv, h.Sum(nil))
 
 	transaction := buildTx(t, tx.TxTypeBallotCast, tx.BallotCastData{
-		PollID:               pollID,
-		Choices:              choices,
-		BallotNonce:          nonce,
-		BeaconBlockHash:      testBeaconHash,
-		BeaconBlockHeight:    testBeaconHeight,
-		Timestamp:            time.Now().Unix(),
-		VoterPubKey:          voterPubHex,
-		VoterSig:             voterSig,
-		IdentusSubjectDID:    subjectDID,
-		IdentusCredentialSig: credSig,
+		PollID:            pollID,
+		Choices:           choices,
+		BallotNonce:       nonce,
+		BeaconBlockHash:   testBeaconHash,
+		BeaconBlockHeight: testBeaconHeight,
+		Timestamp:         time.Now().Unix(),
+		VoterPubKey:       voterPubHex,
+		VoterSig:          voterSig,
+		IdvAttestationSig: idvSig,
 	})
 	return *transaction
 }
@@ -185,23 +183,21 @@ func updateIdentusBallot(
 	voterSig := ed25519.Sign(voterPriv, []byte("update:"+newNonce+":"+pollID))
 
 	h := sha256.New()
-	h.Write([]byte(subjectDID))
 	h.Write([]byte(voterPubHex))
 	h.Write([]byte(pollID))
-	credSig := ed25519.Sign(issuerPriv, h.Sum(nil))
+	idvSig := ed25519.Sign(issuerPriv, h.Sum(nil))
 
 	transaction := buildTx(t, tx.TxTypeUpdateBallot, tx.BallotUpdateData{
-		PollID:               pollID,
-		OldBallotID:          oldBallotID,
-		NewBallotNonce:       newNonce,
-		NewChoices:           newChoices,
-		BeaconBlockHash:      testBeaconHash,
-		BeaconBlockHeight:    testBeaconHeight,
-		Timestamp:            time.Now().Unix(),
-		VoterPubKey:          voterPubHex,
-		VoterSig:             voterSig,
-		IdentusSubjectDID:    subjectDID,
-		IdentusCredentialSig: credSig,
+		PollID:            pollID,
+		OldBallotID:       oldBallotID,
+		NewBallotNonce:    newNonce,
+		NewChoices:        newChoices,
+		BeaconBlockHash:   testBeaconHash,
+		BeaconBlockHeight: testBeaconHeight,
+		Timestamp:         time.Now().Unix(),
+		VoterPubKey:       voterPubHex,
+		VoterSig:          voterSig,
+		IdvAttestationSig: idvSig,
 	})
 	if err := s.ValidateTx(transaction); err != nil {
 		t.Fatalf("ValidateTx (update): %v", err)
@@ -222,24 +218,21 @@ func confirmIdentusReceipt(
 	voterPubHex := hex.EncodeToString(voterPriv.Public().(ed25519.PublicKey))
 
 	hid := sha256.New()
-	hid.Write([]byte(subjectDID))
 	hid.Write([]byte(voterPubHex))
 	hid.Write([]byte(pollID))
 	identityHash := hex.EncodeToString(hid.Sum(nil))
 
 	hcm := sha256.New()
 	hcm.Write([]byte("confirm:"))
-	hcm.Write([]byte(subjectDID))
 	hcm.Write([]byte(voterPubHex))
 	hcm.Write([]byte(pollID))
-	confirmCredSig := ed25519.Sign(issuerPriv, hcm.Sum(nil))
+	confirmIDVSig := ed25519.Sign(issuerPriv, hcm.Sum(nil))
 
 	confirmTx := buildTx(t, tx.TxTypeConfirmReceipt, tx.ConfirmReceiptData{
-		PollID:               pollID,
-		IdentityHash:         identityHash,
-		VoterPubKey:          voterPubHex,
-		IdentusSubjectDID:    subjectDID,
-		IdentusCredentialSig: confirmCredSig,
+		PollID:            pollID,
+		IdentityHash:      identityHash,
+		VoterPubKey:       voterPubHex,
+		IdvAttestationSig: confirmIDVSig,
 	})
 	if err := s.ValidateTx(confirmTx); err != nil {
 		t.Fatalf("ValidateTx (confirm): %v", err)
@@ -342,7 +335,6 @@ func TestBallotCastDeduplication(t *testing.T) {
 	// Second ballot with the same identity (same subjectDID + voterPub → same identity_hash).
 	voterPubHex := hex.EncodeToString(voterPriv.Public().(ed25519.PublicKey))
 	hd := sha256.New()
-	hd.Write([]byte(subjectDID))
 	hd.Write([]byte(voterPubHex))
 	hd.Write([]byte("poll-dedup"))
 	credSig := ed25519.Sign(issuerPriv, hd.Sum(nil))
@@ -353,16 +345,15 @@ func TestBallotCastDeduplication(t *testing.T) {
 		Type:      tx.TxTypeBallotCast,
 		Signature: []byte{1},
 		Data: mustMarshalJSON(t, tx.BallotCastData{
-			PollID:               "poll-dedup",
-			Choices:              []string{"no"},
-			BallotNonce:          nonce002,
-			BeaconBlockHash:      testBeaconHash,
-			BeaconBlockHeight:    testBeaconHeight,
-			Timestamp:            time.Now().Unix(),
-			VoterPubKey:          voterPubHex,
-			VoterSig:             voterSig2,
-			IdentusSubjectDID:    subjectDID,
-			IdentusCredentialSig: credSig,
+			PollID:            "poll-dedup",
+			Choices:           []string{"no"},
+			BallotNonce:       nonce002,
+			BeaconBlockHash:   testBeaconHash,
+			BeaconBlockHeight: testBeaconHeight,
+			Timestamp:         time.Now().Unix(),
+			VoterPubKey:       voterPubHex,
+			VoterSig:          voterSig2,
+			IdvAttestationSig: credSig,
 		}),
 	})
 	err = s.ValidateTx(t2)
@@ -696,23 +687,21 @@ func TestAdversarialUpdateWrongVoter(t *testing.T) {
 	nonceBAttempt := testNonce("b-attempt")
 	voterBSig := ed25519.Sign(voterBPriv, []byte("update:"+nonceBAttempt+":"+pollID))
 	hb := sha256.New()
-	hb.Write([]byte("did:test:bob"))
 	hb.Write([]byte(voterBPubHex))
 	hb.Write([]byte(pollID))
 	credSig := ed25519.Sign(issuerPriv, hb.Sum(nil))
 
 	attackTx := buildTx(t, tx.TxTypeUpdateBallot, tx.BallotUpdateData{
-		PollID:               pollID,
-		OldBallotID:          oldBallotID, // Voter A's ballot_id
-		NewBallotNonce:       nonceBAttempt,
-		NewChoices:           []string{"no"},
-		BeaconBlockHash:      testBeaconHash,
-		BeaconBlockHeight:    testBeaconHeight,
-		Timestamp:            time.Now().Unix(),
-		VoterPubKey:          voterBPubHex,
-		VoterSig:             voterBSig,
-		IdentusSubjectDID:    "did:test:bob",
-		IdentusCredentialSig: credSig,
+		PollID:            pollID,
+		OldBallotID:       oldBallotID, // Voter A's ballot_id
+		NewBallotNonce:    nonceBAttempt,
+		NewChoices:        []string{"no"},
+		BeaconBlockHash:   testBeaconHash,
+		BeaconBlockHeight: testBeaconHeight,
+		Timestamp:         time.Now().Unix(),
+		VoterPubKey:       voterBPubHex,
+		VoterSig:          voterBSig,
+		IdvAttestationSig: credSig,
 	})
 
 	if err := s.ValidateTx(attackTx); err == nil {
@@ -749,7 +738,6 @@ func TestAdversarialUpdateTamperedSig(t *testing.T) {
 	oldBallotID := computeBallotIDWithBeacon(testBeaconHash, testNonce("cast-tamper"))
 
 	ht := sha256.New()
-	ht.Write([]byte(subjectDID))
 	ht.Write([]byte(voterPubHex))
 	ht.Write([]byte(pollID))
 	credSig := ed25519.Sign(issuerPriv, ht.Sum(nil))
@@ -760,17 +748,16 @@ func TestAdversarialUpdateTamperedSig(t *testing.T) {
 	tamperedSig[0] = 0xff
 
 	tamperTx := buildTx(t, tx.TxTypeUpdateBallot, tx.BallotUpdateData{
-		PollID:               pollID,
-		OldBallotID:          oldBallotID,
-		NewBallotNonce:       testNonce("tampered"),
-		NewChoices:           []string{"no"},
-		BeaconBlockHash:      testBeaconHash,
-		BeaconBlockHeight:    testBeaconHeight,
-		Timestamp:            time.Now().Unix(),
-		VoterPubKey:          voterPubHex,
-		VoterSig:             tamperedSig, // tampered
-		IdentusSubjectDID:    subjectDID,
-		IdentusCredentialSig: credSig,
+		PollID:            pollID,
+		OldBallotID:       oldBallotID,
+		NewBallotNonce:    testNonce("tampered"),
+		NewChoices:        []string{"no"},
+		BeaconBlockHash:   testBeaconHash,
+		BeaconBlockHeight: testBeaconHeight,
+		Timestamp:         time.Now().Unix(),
+		VoterPubKey:       voterPubHex,
+		VoterSig:          tamperedSig, // tampered
+		IdvAttestationSig: credSig,
 	})
 
 	if err := s.ValidateTx(tamperTx); err == nil {
@@ -984,10 +971,8 @@ func TestBallotIdentifierDerivationNoncePlusPayloadFlow(t *testing.T) {
 		t.Fatalf("generate voter key: %v", err)
 	}
 	voterPubHex := hex.EncodeToString(voterPriv.Public().(ed25519.PublicKey))
-	subjectDID := "did:test:derivation-mode"
 
 	h := sha256.New()
-	h.Write([]byte(subjectDID))
 	h.Write([]byte(voterPubHex))
 	h.Write([]byte(pollID))
 	credSig := ed25519.Sign(issuerPriv, h.Sum(nil))
@@ -1004,8 +989,7 @@ func TestBallotIdentifierDerivationNoncePlusPayloadFlow(t *testing.T) {
 		Timestamp:                      time.Now().Unix(),
 		VoterPubKey:                    voterPubHex,
 		VoterSig:                       ed25519.Sign(voterPriv, []byte(castNonce+":"+pollID)),
-		IdentusSubjectDID:              subjectDID,
-		IdentusCredentialSig:           credSig,
+		IdvAttestationSig:              credSig,
 	})
 
 	batch := buildBatchFlushTx(t, pollID, *castTx)
@@ -1037,8 +1021,7 @@ func TestBallotIdentifierDerivationNoncePlusPayloadFlow(t *testing.T) {
 		Timestamp:                      time.Now().Unix(),
 		VoterPubKey:                    voterPubHex,
 		VoterSig:                       ed25519.Sign(voterPriv, []byte("update:"+newNonce+":"+pollID)),
-		IdentusSubjectDID:              subjectDID,
-		IdentusCredentialSig:           credSig,
+		IdvAttestationSig:              credSig,
 	})
 
 	if err := s.ValidateTx(updateTx); err != nil {
@@ -1079,7 +1062,6 @@ func TestBatchFlushIdentifierDerivationNoncePlusPayload(t *testing.T) {
 	voterOnePubHex := hex.EncodeToString(voterOnePriv.Public().(ed25519.PublicKey))
 	subjectOne := "did:test:batch-one"
 	hOne := sha256.New()
-	hOne.Write([]byte(subjectOne))
 	hOne.Write([]byte(voterOnePubHex))
 	hOne.Write([]byte(pollID))
 	credOne := ed25519.Sign(issuerPriv, hOne.Sum(nil))
@@ -1089,9 +1071,7 @@ func TestBatchFlushIdentifierDerivationNoncePlusPayload(t *testing.T) {
 		t.Fatalf("generate voter two key: %v", err)
 	}
 	voterTwoPubHex := hex.EncodeToString(voterTwoPriv.Public().(ed25519.PublicKey))
-	subjectTwo := "did:test:batch-two"
 	hTwo := sha256.New()
-	hTwo.Write([]byte(subjectTwo))
 	hTwo.Write([]byte(voterTwoPubHex))
 	hTwo.Write([]byte(pollID))
 	credTwo := ed25519.Sign(issuerPriv, hTwo.Sum(nil))
@@ -1119,8 +1099,7 @@ func TestBatchFlushIdentifierDerivationNoncePlusPayload(t *testing.T) {
 		Timestamp:                      time.Now().Unix(),
 		VoterPubKey:                    voterTwoPubHex,
 		VoterSig:                       ed25519.Sign(voterTwoPriv, []byte(nonceTwo+":"+pollID)),
-		IdentusSubjectDID:              subjectTwo,
-		IdentusCredentialSig:           credTwo,
+		IdvAttestationSig:              credTwo,
 	})
 
 	batch := buildBatchFlushTx(t, pollID, castOne, *castTwo)

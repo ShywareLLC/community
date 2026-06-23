@@ -285,7 +285,7 @@ func (s *State) signTallyPayload(
 			// HSM/KMS unavailable at runtime: fall back to SHA-256 stub so that
 			// the canonical tally write is not blocked (Claim 6 — canonical writes
 			// preserved during HSM-unavailability fallback).
-			s.logger.Error("KMS signer unavailable — HSM-unavailability fallback to SHA-256 stub",
+			s.logger.Error("KMS signer unavailable — degraded fallback to SHA-256 stub",
 				"scoping_id", pollID,
 				"error", err,
 			)

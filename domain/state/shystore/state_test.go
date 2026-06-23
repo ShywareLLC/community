@@ -12,8 +12,8 @@ import (
 	dbm "github.com/cometbft/cometbft-db"
 	"github.com/cometbft/cometbft/libs/log"
 
-	"github.com/ShywareLLC/community/services/identity"
 	"github.com/ShywareLLC/community/protocol/tx"
+	"github.com/ShywareLLC/community/services/identity"
 )
 
 // testNonce returns a deterministic valid 64-hex-char nonce for tests.
@@ -51,7 +51,6 @@ func buildStoreTx(t *testing.T, typ uint8, payload any) *tx.Tx {
 
 func identusCredentialSig(issuerPriv ed25519.PrivateKey, subjectDID, senderPubHex, bucketID string) []byte {
 	h := sha256.New()
-	h.Write([]byte(subjectDID))
 	h.Write([]byte(senderPubHex))
 	h.Write([]byte(bucketID))
 	return ed25519.Sign(issuerPriv, h.Sum(nil))
@@ -98,8 +97,7 @@ func TestSecretIdentifierDerivationNoncePlusPayloadStoreAndRotate(t *testing.T) 
 		SealedPayload:                  initialPayload,
 		SenderPubKey:                   senderPubHex,
 		SenderSig:                      ed25519.Sign(senderPriv, []byte(initialNonce+":"+bucketID)),
-		IdentusSubjectDID:              subjectDID,
-		IdentusCredentialSig:           credSig,
+		IdvAttestationSig:              credSig,
 	})
 
 	if err := s.ValidateTx(storeTx); err != nil {
@@ -130,8 +128,7 @@ func TestSecretIdentifierDerivationNoncePlusPayloadStoreAndRotate(t *testing.T) 
 		Timestamp:                      time.Now().Unix(),
 		SenderPubKey:                   senderPubHex,
 		SenderSig:                      ed25519.Sign(senderPriv, []byte("rotate:"+rotatedNonce+":"+bucketID)),
-		IdentusSubjectDID:              subjectDID,
-		IdentusCredentialSig:           credSig,
+		IdvAttestationSig:              credSig,
 	})
 
 	if err := s.ValidateTx(rotateTx); err != nil {

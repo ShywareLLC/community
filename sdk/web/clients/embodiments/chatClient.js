@@ -7,6 +7,7 @@
  * IMPORTANT: The sealer (AES-GCM encryption, two-party oracle) is ONLY for PII/high-risk payloads, as specified in shyconfig.sealer. Default is structural anonymity via invariant.
  * Uses shared sealer logic from shywareSealer.js for PII/high-risk payloads. Accepts async deriveSealerKey for idempotent, ephemeral key derivation. All gating is driven by the 'sealer' block in config.
  */
+import { warnFoldedAuthority } from '../shywareConfig.js';
 import { sealPayload, openPayload } from "../../protocol/sealer.js";
 
 // shychat-v1 is the canonical contract version for all messaging surfaces.
@@ -270,6 +271,7 @@ export function createChatClient({
 }
 
 export function initializeFromShyConfig(shyconfig, options = {}) {
+  warnFoldedAuthority(shyconfig);
   assertChatManifest(shyconfig);
 
   const requiresAuth =

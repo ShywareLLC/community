@@ -10,8 +10,7 @@ import (
 	"github.com/ShywareLLC/community/protocol/zkp"
 )
 
-// DiditVerifier implements the preferred embodiment (Didit device attestation,
-// no ZK circuit).
+// DiditVerifier implements the preferred non-ZK IDV attestation embodiment.
 //
 // identity_hash = sha256(voter_pub_key || poll_id)
 // Didit signs sha256(voter_pub_key || poll_id) to attest the keypair belongs
@@ -21,34 +20,34 @@ type DiditVerifier struct {
 }
 
 func (v *DiditVerifier) VerifyAndIdentify(data *tx.BallotCastData) (string, error) {
-	if len(data.DiditDeviceSig) == 0 {
-		return "", fmt.Errorf("didit_device_sig is required")
+	if len(data.IdvAttestationSig) == 0 {
+		return "", fmt.Errorf("idv_attestation_sig is required")
 	}
 	msg := diditDeviceAttestMessage(data.VoterPubKey, data.PollID)
-	if !ed25519.Verify(v.PubKey, msg, data.DiditDeviceSig) {
+	if !ed25519.Verify(v.PubKey, msg, data.IdvAttestationSig) {
 		return "", fmt.Errorf("Didit device attestation signature invalid for poll %s", data.PollID)
 	}
 	return diditIdentityHash(data.VoterPubKey, data.PollID), nil
 }
 
 func (v *DiditVerifier) VerifyAndIdentifyUpdate(data *tx.BallotUpdateData) (string, error) {
-	if len(data.DiditDeviceSig) == 0 {
-		return "", fmt.Errorf("didit_device_sig is required for ballot update")
+	if len(data.IdvAttestationSig) == 0 {
+		return "", fmt.Errorf("idv_attestation_sig is required for ballot update")
 	}
 	msg := diditDeviceAttestMessage(data.VoterPubKey, data.PollID)
-	if !ed25519.Verify(v.PubKey, msg, data.DiditDeviceSig) {
+	if !ed25519.Verify(v.PubKey, msg, data.IdvAttestationSig) {
 		return "", fmt.Errorf("Didit device attestation signature invalid for ballot update on poll %s", data.PollID)
 	}
 	return diditIdentityHash(data.VoterPubKey, data.PollID), nil
 }
 
 func (v *DiditVerifier) VerifyAndIdentifyConfirm(data *tx.ConfirmReceiptData) (string, error) {
-	if len(data.DiditDeviceSig) == 0 {
-		return "", fmt.Errorf("didit_device_sig is required for confirm receipt")
+	if len(data.IdvAttestationSig) == 0 {
+		return "", fmt.Errorf("idv_attestation_sig is required for confirm receipt")
 	}
 	// "confirm:" prefix prevents replay of cast-time attestations.
 	msg := diditConfirmAttestMessage(data.VoterPubKey, data.PollID)
-	if !ed25519.Verify(v.PubKey, msg, data.DiditDeviceSig) {
+	if !ed25519.Verify(v.PubKey, msg, data.IdvAttestationSig) {
 		return "", fmt.Errorf("Didit device attestation signature invalid for confirm receipt on poll %s", data.PollID)
 	}
 	return diditIdentityHash(data.VoterPubKey, data.PollID), nil

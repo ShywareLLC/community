@@ -3,9 +3,10 @@
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS tallies_view AS
 SELECT
-    attrs_poll_id.value AS poll_id,
+    attrs_scoping_id.value AS poll_id,
     attrs_total_votes.value::BIGINT AS total_votes,
-    attrs_merkle_root.value AS merkle_root,
+    attrs_l1_commitment.value AS l1_commitment,
+    attrs_l2_commitment.value AS l2_commitment,
     attrs_finalized_at.value::BIGINT AS finalized_at,
     tx.height AS closing_height,
     b.block_time AS closed_at,
@@ -14,9 +15,10 @@ SELECT
 FROM tx_results tx
 JOIN blocks b ON tx.height = b.height
 JOIN events e ON e.tx_hash = tx.tx_hash
-JOIN attributes attrs_poll_id ON attrs_poll_id.event_id = e.id AND attrs_poll_id.key = 'poll_id'
+JOIN attributes attrs_scoping_id ON attrs_scoping_id.event_id = e.id AND attrs_scoping_id.key = 'scoping_id'
 LEFT JOIN attributes attrs_total_votes ON attrs_total_votes.event_id = e.id AND attrs_total_votes.key = 'total_votes'
-LEFT JOIN attributes attrs_merkle_root ON attrs_merkle_root.event_id = e.id AND attrs_merkle_root.key = 'merkle_root'
+LEFT JOIN attributes attrs_l1_commitment ON attrs_l1_commitment.event_id = e.id AND attrs_l1_commitment.key = 'l1_commitment'
+LEFT JOIN attributes attrs_l2_commitment ON attrs_l2_commitment.event_id = e.id AND attrs_l2_commitment.key = 'l2_commitment'
 LEFT JOIN attributes attrs_finalized_at ON attrs_finalized_at.event_id = e.id AND attrs_finalized_at.key = 'finalized_at'
 WHERE e.type = 'poll_closed'
     AND tx.success = true
@@ -46,7 +48,8 @@ SELECT
     p.created_at,
     p.created_height,
     t.total_votes,
-    t.merkle_root,
+    t.l1_commitment,
+    t.l2_commitment,
     t.finalized_at,
     t.closing_height,
     t.closed_at,
@@ -60,5 +63,5 @@ FROM polls_view p
 LEFT JOIN tallies_view t ON p.poll_id = t.poll_id
 ORDER BY p.created_at DESC;
 
-COMMENT ON MATERIALIZED VIEW tallies_view IS 'Queryable poll tallies';
+COMMENT ON MATERIALIZED VIEW tallies_view IS 'Queryable poll tallies with separate L1 and L2 commitments';
 COMMENT ON VIEW polls_with_tallies IS 'Polls joined with their tallies and computed status';
